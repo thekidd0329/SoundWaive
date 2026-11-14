@@ -1,0 +1,12 @@
+<resources>
+  <style name="SoundWaiveBaseTheme" parent="android:style/Theme.Material.NoActionBar">
+    <item name="android:fontFamily">sans</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:statusBarColor">#101015</item>
+    <item name="android:navigationBarColor">#101015</item>
+    <item name="android:colorAccent">#DDF75D</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowBackground">#101015</item>
+  </style>
+  <style name="AppTheme" parent="SoundWaiveBaseTheme" />
+</resources>

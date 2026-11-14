@@ -1,0 +1,16 @@
+* text=auto
+*.kt text eol=lf
+*.kts text eol=lf
+*.rs text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.png binary
+*.m4a binary
+*.analysis binary
+*.jar binary
+# Preserve upstream license formatting verbatim.
+licenses/** whitespace=-blank-at-eof

@@ -1,0 +1,38 @@
+{
+  "independent-portrait": {
+    "coded_width": 1920,
+    "coded_height": 1080,
+    "rotation": [
+      {
+        "side_data_type": "Display Matrix",
+        "displaymatrix": "\n00000000:            0       65536           0\n00000001:       -65536           0           0\n00000002:            0           0  1073741824\n",
+        "rotation": -90
+      }
+    ],
+    "frames": "60",
+    "fps": "30/1",
+    "video_duration": "2.000000",
+    "audio_duration": "2.000000",
+    "audio_channels": 2,
+    "audio_sample_rate": "44100",
+    "decoded_sample_count": 89088,
+    "source_correlation": 0.9998552436026126,
+    "audio_delay_ms": 0.0,
+    "bytes": 2791727
+  },
+  "independent-landscape": {
+    "coded_width": 1280,
+    "coded_height": 720,
+    "rotation": [],
+    "frames": "24",
+    "fps": "24/1",
+    "video_duration": "1.000000",
+    "audio_duration": "1.000000",
+    "audio_channels": 2,
+    "audio_sample_rate": "44100",
+    "decoded_sample_count": 45056,
+    "source_correlation": 0.9995730125448056,
+    "audio_delay_ms": 0.0,
+    "bytes": 983017
+  }
+}

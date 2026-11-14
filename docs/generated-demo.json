@@ -1,0 +1,8 @@
+{
+  "origin": "Synthesized exclusively from mathematical oscillators and seeded noise by tools/generate_demo.py; no user recording, sample pack or external audio is used.",
+  "duration_seconds": 32,
+  "tempo_bpm": 120,
+  "seed": 171203,
+  "playback_sample_rate": 44100,
+  "channels": 2
+}

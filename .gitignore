@@ -1,0 +1,21 @@
+.gradle/
+.kotlin/
+.idea/
+**/build/
+**/target/
+local.properties
+*.iml
+*.apk
+*.aab
+*.idsig
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+!*.example
+.DS_Store
+
+# Recreated from oscillators/noise during the build. Never store private music here.
+app/src/main/assets/generated-demo.*
+generated-demo.sha256
