@@ -874,6 +874,8 @@ class MainActivity : Activity() {
         toggle("Color split on snares", "colorSplit")
         toggle("Glow that changes color with the notes", "noteGlow")
         toggle("Sparkles on hi-hats", "sparkles")
+        toggle("Ripple on hits", "hitRipple")
+        toggle("Rainbow edge on bright sounds", "brightFringe")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -886,6 +888,8 @@ class MainActivity : Activity() {
             slider("Color split strength", "colorSplitAmount", 0f, 2f)
             slider("Glow strength", "noteGlowAmount", 0f, 2f)
             slider("Sparkle amount", "sparkleAmount", 0f, 2f)
+            slider("Ripple strength", "hitRippleAmount", 0f, 2f)
+            slider("Rainbow edge strength", "brightFringeAmount", 0f, 2f)
         }
         panel.addView(
             text(

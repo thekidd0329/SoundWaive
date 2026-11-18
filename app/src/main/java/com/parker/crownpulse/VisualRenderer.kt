@@ -59,6 +59,11 @@ class VisualRenderer(context: Context) {
     private val glowNote = FloatArray(3)
     private val glowHsv = FloatArray(3)
     private val screenRect = RectF()
+    // Ripple on hits: age and strength of the hit that ripples the symbol this frame (see
+    // [BeatFx.latestHit]), its amount (0 = off) and one reusable mesh for drawBitmapMesh.
+    private val hitInfo = floatArrayOf(-1f, 0f)
+    private var rippleAmount = 0f
+    private val meshVerts = FloatArray((MESH + 1) * (MESH + 1) * 2)
     // The vignette only changes when its strength or the frame height does, so keep it.
     private var vignetteShader: Shader? = null
     private var vignetteKey = Float.NaN
@@ -392,6 +397,12 @@ class VisualRenderer(context: Context) {
             c.scale(-1f, 1f)
         }
         updateBeatClock(t, a, s)
+        rippleAmount = if (s.b("hitRipple")) s.f("hitRippleAmount") else 0f
+        if (rippleAmount > 0f) {
+            BeatFx.latestHit(a.onsetTimes, a.onsetStrengths, t, hitInfo)
+        } else {
+            hitInfo[0] = -1f
+        }
         // Punch in on the first beat of each bar: a short zoom around the symbol that settles
         // within half a second. The layers zoom; background, grain, vignette and text do not.
         val punchSave = c.save()
@@ -489,11 +500,22 @@ class VisualRenderer(context: Context) {
             val offset = BeatFx.splitOffset(snare, s.f("colorSplitAmount"))
             if (offset > .5f) {
                 val ghost = s.f("opacity") * .6f
-                stamp(c, s, t, size, cx + offset, cy, angle, ghost, splitRed)
-                stamp(c, s, t, size, cx - offset, cy, angle, ghost, splitCyan)
+                stamp(c, s, t, size, cx + offset, cy, angle, ghost, splitRed, ripple = true)
+                stamp(c, s, t, size, cx - offset, cy, angle, ghost, splitCyan, ripple = true)
             }
         }
-        stamp(c, s, t, size, cx, cy, angle, s.f("opacity"))
+        if (s.b("brightFringe") && s.f("brightFringeAmount") > 0f) {
+            // Bright, airy sounds push red and cyan copies out around the symbol (a radial
+            // rainbow edge); the brightness is the spectral centroid of this frame's bands.
+            val centroid = BeatFx.spectralCentroid(a.data, index * a.stride + 8, a.bands)
+            val grow = BeatFx.fringeScale(high, centroid, s.f("brightFringeAmount"))
+            if (grow > .002f) {
+                val ghost = s.f("opacity") * .45f
+                stamp(c, s, t, size * (1 + 2 * grow), cx, cy, angle, ghost, splitRed, true)
+                stamp(c, s, t, size * (1 + grow), cx, cy, angle, ghost, splitCyan, true)
+            }
+        }
+        stamp(c, s, t, size, cx, cy, angle, s.f("opacity"), ripple = true)
         if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
             shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
         if (s.b("sparkles")) sparkles(c, t, s, cx, cy, size, hat, s.f("sparkleAmount"), tertiary)
@@ -692,8 +714,13 @@ class VisualRenderer(context: Context) {
         cy: Float,
         angle: Float,
         alpha: Float,
-        /** When not 0, draws a flat copy in this color (the snare color split) without glow. */
+        /**
+         * When not 0, draws a flat copy in this color (snare color split, rainbow edge)
+         * without glow.
+         */
         ghost: Int = 0,
+        /** Whether the ripple on hits bends this copy (the main symbol and its ghosts). */
+        ripple: Boolean = false,
     ) {
         val type = s.s("symbol")
         if (type == "None") return
@@ -751,11 +778,11 @@ class VisualRenderer(context: Context) {
                 p.alpha = (alpha * 65).toInt().coerceIn(0, 255)
                 c.save()
                 c.scale(1.025f, 1.025f)
-                c.drawBitmap(img, null, rect, p)
+                symbolBitmap(c, img, rect, ripple)
                 c.restore()
                 p.alpha = (alpha * 255).toInt().coerceIn(0, 255)
             }
-            c.drawBitmap(img, null, rect, p)
+            symbolBitmap(c, img, rect, ripple)
             p.colorFilter = null
         } else if (type == "Equalizer") {
             for (i in 0..4) {
@@ -777,6 +804,41 @@ class VisualRenderer(context: Context) {
             c.drawPath(path, p)
         }
         c.restore()
+    }
+
+    /**
+     * Draws the symbol bitmap into [rect] (local coordinates centered on the symbol). While a
+     * hit ripples ([ripple] and [hitInfo]), it is drawn as a [MESH] x [MESH] grid whose points
+     * are pushed along the radius by [BeatFx.rippleShift], so a wave rolls out through the
+     * picture. Reuses [meshVerts]; no allocation.
+     */
+    private fun symbolBitmap(c: Canvas, img: Bitmap, rect: RectF, ripple: Boolean) {
+        val age = hitInfo[0]
+        if (!ripple || rippleAmount <= 0f || !(age >= 0f)) {
+            c.drawBitmap(img, null, rect, p)
+            return
+        }
+        val strength = hitInfo[1]
+        // Distances in symbol heights, so wide custom artwork keeps the same wave.
+        val unit = rect.height()
+        var k = 0
+        for (iy in 0..MESH) {
+            val y = rect.top + rect.height() * iy / MESH
+            for (ix in 0..MESH) {
+                val x = rect.left + rect.width() * ix / MESH
+                val r = sqrt(x * x + y * y)
+                var px = x
+                var py = y
+                if (r > 1e-4f) {
+                    val shift = BeatFx.rippleShift(r / unit, age, strength, rippleAmount) * unit
+                    px += x / r * shift
+                    py += y / r * shift
+                }
+                meshVerts[k++] = px
+                meshVerts[k++] = py
+            }
+        }
+        c.drawBitmapMesh(img, MESH, MESH, meshVerts, 0, null, 0, p)
     }
 
     private fun symbolOutline(
@@ -1234,5 +1296,10 @@ class VisualRenderer(context: Context) {
         p.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         p.textSize = 25 * s.f("textSize")
         c.drawText(s.s("subtitle").take(80), 540f, y + 50 * s.f("textSize"), p)
+    }
+
+    private companion object {
+        /** Cells per side of the ripple mesh: 17 x 17 points, enough for a smooth wave. */
+        const val MESH = 16
     }
 }

@@ -46,6 +46,10 @@ class Analysis(
     val noteTimes = FloatArray(notes.size) { notesByTime[it].time }
     val noteMidi = IntArray(notes.size) { notesByTime[it].midi }
     val noteVelocity = FloatArray(notes.size) { notesByTime[it].velocity }
+    /** Hits (salient onsets) sorted by time as primitive arrays, for the ripple on hits. */
+    private val onsetsByTime = onsets.sortedBy { it.time }
+    val onsetTimes = FloatArray(onsets.size) { onsetsByTime[it].time }
+    val onsetStrengths = FloatArray(onsets.size) { onsetsByTime[it].strength }
 
     init {
         var sum = 0f
@@ -145,12 +149,15 @@ class Settings(var json: JSONObject = newLook()) {
         // Keep their appearance: a missing effect switch there means off. New looks and
         // presets are written with the current version, so for them a missing switch still
         // falls back to DEFAULTS (on).
-        // The same rule for the 1.5 glow effects: looks stored before 1.5 keep them off.
+        // The same rule for the 1.5 glow effects and the 1.6 ripple and rainbow edge: looks
+        // stored before them keep them off.
         val stored = json.optInt(LOOK_VERSION_KEY, 1)
         if (stored < BEAT_EFFECTS_VERSION)
             for (k in BEAT_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < GLOW_EFFECTS_VERSION)
             for (k in GLOW_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+        if (stored < RIPPLE_EFFECTS_VERSION)
+            for (k in RIPPLE_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < LOOK_VERSION) json.put(LOOK_VERSION_KEY, LOOK_VERSION)
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
@@ -206,6 +213,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "colorSplitAmount" to (0.0..2.0),
                 "noteGlowAmount" to (0.0..2.0),
                 "sparkleAmount" to (0.0..2.0),
+                "hitRippleAmount" to (0.0..2.0),
+                "brightFringeAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -316,9 +325,12 @@ class Settings(var json: JSONObject = newLook()) {
                 set("trails", 12)
                 set("shake", .35)
                 set("background", "#171717")
-                // Black and white look: no colored glow, sparkles stay (they are white).
+                // Black and white look: no colored glow or rainbow edge; sparkles and the
+                // ripple stay (they keep the symbol's own colors).
                 set("noteGlow", false)
                 set("sparkles", true)
+                set("hitRipple", true)
+                set("brightFringe", false)
             }
             "Cosmic bloom" -> {
                 set("palette", "Aurora")
@@ -362,6 +374,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("colorSplit", false)
                 set("noteGlow", false)
                 set("sparkles", false)
+                set("hitRipple", false)
+                set("brightFringe", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -419,14 +433,16 @@ class Settings(var json: JSONObject = newLook()) {
     companion object {
         /**
          * Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. 3: 1.5 note
-         * color glow and hi-hat sparkles.
+         * color glow and hi-hat sparkles. 4: 1.6 ripple on hits and rainbow edge.
          */
         const val LOOK_VERSION_KEY = "lookVersion"
         const val BEAT_EFFECTS_VERSION = 2
         const val GLOW_EFFECTS_VERSION = 3
-        const val LOOK_VERSION = 3
+        const val RIPPLE_EFFECTS_VERSION = 4
+        const val LOOK_VERSION = 4
         val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
         val GLOW_EFFECT_SWITCHES = listOf("noteGlow", "sparkles")
+        val RIPPLE_EFFECT_SWITCHES = listOf("hitRipple", "brightFringe")
 
         /** Empty JSON for a brand-new look, stamped with the current format version. */
         fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
@@ -556,6 +572,12 @@ class Settings(var json: JSONObject = newLook()) {
                 "noteGlowAmount" to 1.0,
                 "sparkles" to true,
                 "sparkleAmount" to 1.0,
+                // 1.6 ripple and rainbow edge: on for new looks and presets, off for looks
+                // stored before.
+                "hitRipple" to true,
+                "hitRippleAmount" to 1.0,
+                "brightFringe" to true,
+                "brightFringeAmount" to 1.0,
             )
     }
 }
