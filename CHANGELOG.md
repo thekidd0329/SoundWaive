@@ -1,5 +1,13 @@
 # Changes
 
+## [1.3.1] - 2026-11-18
+
+### Fixed
+- Straight 140 BPM songs with accented 1 and 3 could still read as 70. The doubling check compared the fast beats with the eighths between them instead of looking halfway between the slow beats. It now doubles when nearly every midpoint between the slow beats has a real attack (at least 75 % of them, each at least a quarter of the on-beat strength). A slow groove with only an occasional off-beat kick stays slow. Half-time trap still reads 140 through its sixteenth-note cue, and the halving check is unchanged.
+
+### Added
+- Rust tests for straight quarters at 140 (octave check and full tempo at 12 s and 30 s) and a syncopated 76 BPM groove that must not double.
+
 ## [1.3.0] - 2026-11-18
 
 ### Fixed
