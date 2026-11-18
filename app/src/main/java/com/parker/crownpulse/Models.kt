@@ -36,6 +36,11 @@ class Analysis(
 ) {
     val stride = 8 + bands + waves
     val flow = FloatArray(frames)
+    /** Beat-grid times and flags as primitive arrays so per-frame lookups never allocate. */
+    val beatTimes = FloatArray(beats.size) { beats[it].time }
+    val beatStrengths = FloatArray(beats.size) { beats[it].strength }
+    val beatIsDownbeat = BooleanArray(beats.size) { beats[it].downbeat }
+    val downbeatTimes = beats.filter { it.downbeat }.map { it.time }.toFloatArray()
 
     init {
         var sum = 0f
@@ -176,6 +181,9 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "syncOffset" to (-500.0..500.0),
                 "backgroundDim" to (0.0..1.0),
                 "tempoOverride" to (0.0..240.0),
+                "shockwaveAmount" to (0.0..2.0),
+                "punchAmount" to (0.0..2.0),
+                "colorSplitAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -322,6 +330,7 @@ class Settings(var json: JSONObject = JSONObject()) {
                 set("spokes", false)
                 set("grain", .04)
                 set("drift", .2)
+                set("colorSplit", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -489,6 +498,14 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "textColor" to "#F5F5F5",
                 "syncOffset" to 0.0,
                 "tempoOverride" to 0.0,
+                // 1.4 beat effects. Looks saved before 1.4 lack these keys and get the
+                // defaults below, so older looks gain the effects without any migration step.
+                "shockwaves" to true,
+                "shockwaveAmount" to 1.0,
+                "downbeatPunch" to true,
+                "punchAmount" to 1.0,
+                "colorSplit" to true,
+                "colorSplitAmount" to 1.0,
             )
     }
 }

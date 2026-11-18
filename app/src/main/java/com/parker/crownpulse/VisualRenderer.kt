@@ -21,6 +21,21 @@ class VisualRenderer(context: Context) {
     private var crownInk: Int? = null
     private var crownFilter: ColorFilter? = null
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val stampRect = RectF()
+    // Beat effects: tints for the snare color split and the beat clock for the current frame.
+    // All preallocated so the effects add no per-frame allocation.
+    private val splitRed = Color.rgb(255, 59, 48)
+    private val splitCyan = Color.rgb(40, 228, 255)
+    private val splitRedFilter = PorterDuffColorFilter(splitRed, PorterDuff.Mode.SRC_IN)
+    private val splitCyanFilter = PorterDuffColorFilter(splitCyan, PorterDuff.Mode.SRC_IN)
+    /** Seconds since the latest (0) and previous (1) beat; -1 when there is none. */
+    private val beatAge = FloatArray(2)
+    /** Strength 0..1 of those beats. */
+    private val beatPower = FloatArray(2)
+    /** Whether those beats start a bar. */
+    private val beatDown = BooleanArray(2)
+    /** Seconds since the latest (0) and previous (1) bar line; -1 when there is none. */
+    private val barAge = FloatArray(2)
     private val path = Path()
     private var h = 1920f
     private val tau = (Math.PI * 2).toFloat()
@@ -135,6 +150,74 @@ class VisualRenderer(context: Context) {
             .toInt() + s.i("seed") % 5) % 5
     }
 
+    /**
+     * Fills [beatAge], [beatPower], [beatDown] and [barAge] for music time [t]. Uses the tracked
+     * beat grid when there is one; a manual tempo override or an older analysis file without a
+     * grid uses a fixed 4/4 grid from 0 s, matching how scene changes pick their bars.
+     */
+    private fun updateBeatClock(t: Float, a: Analysis, s: Settings) {
+        val override = s.f("tempoOverride")
+        if (override >= 30f || a.beatTimes.isEmpty()) {
+            val period = BeatFx.period(if (override >= 30f) override else a.bpm)
+            val latest = if (period > 0f) floor(t / period).toInt() else -1
+            for (k in 0..1) {
+                beatAge[k] = BeatFx.gridAge(t, period, k)
+                barAge[k] = BeatFx.gridAge(t, period * 4, k)
+                beatPower[k] = .8f
+                beatDown[k] = latest - k >= 0 && (latest - k) % 4 == 0
+            }
+            return
+        }
+        val i = BeatFx.lastAtOrBefore(a.beatTimes, t)
+        for (k in 0..1) {
+            val j = i - k
+            if (j >= 0) {
+                beatAge[k] = t - a.beatTimes[j]
+                beatPower[k] = a.beatStrengths[j].coerceIn(0f, 1f)
+                beatDown[k] = a.beatIsDownbeat[j]
+            } else {
+                beatAge[k] = -1f
+                beatPower[k] = 0f
+                beatDown[k] = false
+            }
+            barAge[k] = BeatFx.ageOf(a.downbeatTimes, t, k)
+        }
+    }
+
+    /**
+     * Thin rings that leave the symbol on every beat, with a bolder double ring on the first
+     * beat of each bar. Rings ease out (fast start, gentle stop) and fade with a cubic decay.
+     */
+    private fun shockwaves(
+        c: Canvas,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        amount: Float,
+        beatInk: Int,
+        barInk: Int,
+    ) {
+        val base = size * .5f
+        for (k in 0..1) {
+            val age = barAge[k]
+            val fade = BeatFx.decay(age, BeatFx.DOWNBEAT_RING_LIFE)
+            if (fade < .01f) continue
+            val r = base + BeatFx.ringTravel(age, BeatFx.DOWNBEAT_RING_LIFE) * 760f
+            val alpha = (.7f * fade * amount).coerceIn(0f, 1f)
+            circle(c, cx, cy, r, barInk, 1.5f + 6f * fade, alpha)
+            circle(c, cx, cy, r * .86f, barInk, 1f + 2.5f * fade, alpha * .5f)
+        }
+        for (k in 0..1) {
+            if (beatDown[k]) continue // the bar ring already marks this beat
+            val age = beatAge[k]
+            val fade = BeatFx.decay(age, BeatFx.BEAT_RING_LIFE)
+            if (fade < .01f) continue
+            val r = base + BeatFx.ringTravel(age, BeatFx.BEAT_RING_LIFE) * 430f
+            val alpha = (.45f * fade * amount * (.5f + .5f * beatPower[k])).coerceIn(0f, 1f)
+            circle(c, cx, cy, r, beatInk, 1.2f + 3f * fade, alpha)
+        }
+    }
+
     fun draw(
         c: Canvas,
         width: Int,
@@ -204,6 +287,14 @@ class VisualRenderer(context: Context) {
         if (s.b("mirror")) {
             c.translate(1080f, 0f)
             c.scale(-1f, 1f)
+        }
+        updateBeatClock(t, a, s)
+        // Punch in on the first beat of each bar: a short zoom around the symbol that settles
+        // within half a second. The layers zoom; background, grain, vignette and text do not.
+        val punchSave = c.save()
+        if (s.b("downbeatPunch")) {
+            val zoom = BeatFx.punchScale(barAge[0], s.f("punchAmount"))
+            if (zoom > 1.0005f) c.scale(zoom, zoom, cx, cy)
         }
         if (s.b("grid")) grid(c, flow, pal, energy)
         filaments(c, t, a, s, flow, energy, kick, md, pal, detail)
@@ -288,7 +379,18 @@ class VisualRenderer(context: Context) {
                 .16f + .25f * (1 - q),
             )
         }
+        if (s.b("colorSplit")) {
+            // Snare hits split the symbol into red and cyan copies behind it (RGB split).
+            val offset = BeatFx.splitOffset(snare, s.f("colorSplitAmount"))
+            if (offset > .5f) {
+                val ghost = s.f("opacity") * .6f
+                stamp(c, s, t, size, cx + offset, cy, angle, ghost, splitRed)
+                stamp(c, s, t, size, cx - offset, cy, angle, ghost, splitCyan)
+            }
+        }
         stamp(c, s, t, size, cx, cy, angle, s.f("opacity"))
+        if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
+            shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
         if (kick > .16f && s.i("rings") > 0) {
             val age = -.15f * ln(max(kick, .001f))
             for (j in 0..2) {
@@ -329,6 +431,7 @@ class VisualRenderer(context: Context) {
                 rect(c, x - 70, y + 6, 40 + hat * 110, 2f, white, snare * s.f("glitch") * .6f)
             }
         }
+        c.restoreToCount(punchSave)
         if (s.f("grain") > 0) {
             val rng = Random((frame / 2 + 813 + s.i("seed")).toLong())
             repeat((120 * detail).toInt()) {
@@ -475,9 +578,12 @@ class VisualRenderer(context: Context) {
         cy: Float,
         angle: Float,
         alpha: Float,
+        /** When not 0, draws a flat copy in this color (the snare color split) without glow. */
+        ghost: Int = 0,
     ) {
         val type = s.s("symbol")
         if (type == "None") return
+        val inkColor = if (ghost != 0) ghost else s.color("symbolColor")
         c.save()
         c.translate(cx, cy)
         c.rotate((angle + .055f * sin(t * .69f) + .026f * sin(t * 1.3f)) * 180 / PI.toFloat())
@@ -487,9 +593,12 @@ class VisualRenderer(context: Context) {
         if (img != null) {
             val side = if (type == "Drippy crown") 1500 / 1100f else 1.1f
             val ratio = img.height.toFloat() / img.width
-            val rect = RectF(-side / 2, -side * ratio / 2, side / 2, side * ratio / 2)
-            ink(s.color("symbolColor"), alpha, fill = true)
-            if (type == "Drippy crown") {
+            val rect = stampRect
+            rect.set(-side / 2, -side * ratio / 2, side / 2, side * ratio / 2)
+            ink(inkColor, alpha, fill = true)
+            if (ghost != 0) {
+                p.colorFilter = if (ghost == splitRed) splitRedFilter else splitCyanFilter
+            } else if (type == "Drippy crown") {
                 val color = s.color("symbolColor")
                 if (crownInk != color) {
                     crownInk = color
@@ -524,7 +633,7 @@ class VisualRenderer(context: Context) {
             } else if (s.b("tintArtwork"))
                 p.colorFilter =
                     PorterDuffColorFilter(s.color("symbolColor"), PorterDuff.Mode.SRC_IN)
-            if (s.b("glow")) {
+            if (ghost == 0 && s.b("glow")) {
                 p.alpha = (alpha * 65).toInt().coerceIn(0, 255)
                 c.save()
                 c.scale(1.025f, 1.025f)
@@ -537,7 +646,7 @@ class VisualRenderer(context: Context) {
         } else if (type == "Equalizer") {
             for (i in 0..4) {
                 val height = .2f + .4f * abs(sin(t * 3 + i))
-                ink(s.color("symbolColor"), alpha, fill = true)
+                ink(inkColor, alpha, fill = true)
                 c.drawRoundRect(
                     -.4f + i * .17f,
                     -height / 2,
@@ -550,7 +659,7 @@ class VisualRenderer(context: Context) {
             }
         } else {
             symbolPath(type)
-            ink(s.color("symbolColor"), alpha, .025f)
+            ink(inkColor, alpha, .025f)
             c.drawPath(path, p)
         }
         c.restore()
