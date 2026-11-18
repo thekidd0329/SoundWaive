@@ -2,6 +2,7 @@ package com.parker.crownpulse
 
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.math.abs
 
 class BeatFxTest {
     private val eps = 1e-5f
@@ -278,4 +279,47 @@ class BeatFxTest {
         assertEquals(0f, BeatFx.tiltDegrees(BeatFx.TILT_LIFE, false, 1f, 1f), eps)
         assertEquals(0f, BeatFx.tiltDegrees(-1f, true, 1f, 1f), eps)
     }
+
+    @Test
+    fun bounceSquashesOnTheBeatAndSettles() {
+        val sq = BeatFx.BOUNCE_SQUASH
+        // Squashed on the beat, stronger beats squash more, weak ones half as much.
+        assertEquals(-sq, BeatFx.bounceStretch(0f, .5f, 1f, 1f), eps)
+        assertEquals(-sq / 2, BeatFx.bounceStretch(0f, .5f, 0f, 1f), eps)
+        // Half a swing later it has rebounded above its rest shape.
+        assertTrue(BeatFx.bounceStretch(BeatFx.BOUNCE_SWING / 2, 0f, 1f, 1f) > 0f)
+        // Flat once the bounce is over, before the beat and when turned off.
+        assertEquals(0f, BeatFx.bounceStretch(BeatFx.BOUNCE_LIFE, 0f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.bounceStretch(-1f, .5f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.bounceStretch(Float.NaN, .5f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.bounceStretch(0f, .5f, 1f, 0f), eps)
+        // Never more than 30 % either way, even at amount 2.
+        assertTrue(abs(BeatFx.bounceStretch(0f, .5f, 1f, 9f)) <= .3f)
+    }
+
+    @Test
+    fun bounceStretchesJustBeforeTheNextBeat() {
+        // 120 BPM: beats every 0.5 s. Just before the next one it stretches up.
+        val v = BeatFx.bounceStretch(.5f - .005f, .5f, 1f, 1f)
+        assertTrue(v > .4f * BeatFx.BOUNCE_SQUASH)
+        // Earlier than BOUNCE_LEAD before the next beat there is no stretch.
+        assertEquals(0f, BeatFx.bounceStretch(.5f - BeatFx.BOUNCE_LEAD - .01f, .5f, 1f, 1f), eps)
+    }
+
+    @Test
+    fun orbitStepsLandOnTheBeatAndJoinUp() {
+        assertEquals(-1f, BeatFx.orbitSteps(-1, .1f), eps)
+        assertEquals(-1f, BeatFx.orbitSteps(3, -1f), eps)
+        // One step per beat: at the beat it starts from its index, then lands one step on.
+        assertEquals(3f, BeatFx.orbitSteps(3, 0f), eps)
+        assertEquals(4f, BeatFx.orbitSteps(3, BeatFx.ORBIT_STEP_TIME), eps)
+        assertEquals(4f, BeatFx.orbitSteps(3, 5f), eps)
+        // Overshoots a little on the way, then settles.
+        assertTrue(BeatFx.orbitSteps(3, BeatFx.ORBIT_STEP_TIME * .7f) > 4f)
+        // Swell on the beat, more on the first beat of a bar, gone after the pulse.
+        assertEquals(1f, BeatFx.orbitPulse(0f, 1f, false), eps)
+        assertEquals(1.5f, BeatFx.orbitPulse(0f, 1f, true), eps)
+        assertEquals(0f, BeatFx.orbitPulse(BeatFx.ORBIT_PULSE_LIFE, 1f, true), eps)
+    }
 }
+

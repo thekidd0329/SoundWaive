@@ -38,6 +38,8 @@ class VisualRenderer(context: Context) {
     private val barAge = FloatArray(2)
     /** Whether the latest beat is an odd-numbered one (the tilt on beats leans the other way). */
     private var beatOdd = false
+    /** Number of the latest beat (0 = first), -1 before the first beat; drives the orbit dots. */
+    private var beatIndex = -1
     // Note color glow: a soft white disc kept as an alpha mask (ALPHA_8), so drawing it takes
     // its color from the paint and any hue costs no new bitmap, shader or filter per frame.
     private val halo: Bitmap = run {
@@ -200,6 +202,7 @@ class VisualRenderer(context: Context) {
             val period = BeatFx.period(if (override >= 30f) override else a.bpm)
             val latest = if (period > 0f) floor(t / period).toInt() else -1
             beatOdd = latest >= 0 && latest % 2 == 1
+            beatIndex = latest
             for (k in 0..1) {
                 beatAge[k] = BeatFx.gridAge(t, period, k)
                 barAge[k] = BeatFx.gridAge(t, period * 4, k)
@@ -210,6 +213,7 @@ class VisualRenderer(context: Context) {
         }
         val i = BeatFx.lastAtOrBefore(a.beatTimes, t)
         beatOdd = i >= 0 && i % 2 == 1
+        beatIndex = i
         for (k in 0..1) {
             val j = i - k
             if (j >= 0) {
@@ -353,6 +357,43 @@ class VisualRenderer(context: Context) {
         haloRect.set(cx - r, cy - r * 1.12f, cx + r, cy + r * 1.12f)
         ink(color, alpha, fill = true)
         c.drawBitmap(halo, null, haloRect, p)
+    }
+
+    /**
+     * Orbit dots: [BeatFx.ORBIT_DOTS] dots circle the symbol and move one step on every beat,
+     * overshooting a little and settling, so they land on the beat and make a full turn
+     * every two bars. They swell on each beat (more on the first beat of a bar) and each
+     * leaves two fading dots behind while it moves. At most 12 circles, no allocation.
+     */
+    private fun orbitDots(
+        c: Canvas,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        amount: Float,
+        color: Int,
+    ) {
+        val age = beatAge[0]
+        val pos = BeatFx.orbitSteps(beatIndex, age)
+        if (pos < 0f) return
+        val step = tau / BeatFx.ORBIT_STEPS
+        val pulse = BeatFx.orbitPulse(age, beatPower[0], beatDown[0])
+        val rx = size * .66f
+        val ry = rx * 1.12f
+        val dot = (5f + 7f * pulse) * (.6f + .4f * amount.coerceIn(0f, 2f))
+        val alpha = ((.45f + .35f * pulse) * amount).coerceIn(0f, 1f)
+        if (alpha < .01f) return
+        for (k in 2 downTo 0) {
+            // k = 0 is the dot itself; 1 and 2 are where it was 35 and 70 ms ago.
+            val at = if (k == 0) pos else BeatFx.orbitSteps(beatIndex, max(0f, age - k * .035f))
+            if (k > 0 && abs(pos - at) < .02f) continue
+            val r = dot * (if (k == 0) 1f else if (k == 1) .7f else .5f)
+            val a = alpha * (if (k == 0) 1f else if (k == 1) .45f else .2f)
+            for (j in 0 until BeatFx.ORBIT_DOTS) {
+                val angle = at * step + j * tau / BeatFx.ORBIT_DOTS - tau / 4
+                circle(c, cx + cos(angle) * rx, cy + sin(angle) * ry, r, color, a = a, fill = true)
+            }
+        }
     }
 
     /**
@@ -587,6 +628,16 @@ class VisualRenderer(context: Context) {
             lightRays(c, cx, cy, size, bass, flow, s.f("lightRaysAmount"), secondary)
         if (s.b("noteGlow") && s.f("noteGlowAmount") > 0f)
             noteGlow(c, t, a, cx, cy, size, bass, s.f("noteGlowAmount"), primary)
+        val bounceSave = c.save()
+        if (s.b("beatBounce")) {
+            // Bounce on beats: the symbol squashes on each beat, rebounds and settles, and
+            // stretches up just before the next beat. Pivots on the symbol's base so it lands.
+            val period =
+                if (beatAge[0] >= 0f && beatAge[1] >= 0f) beatAge[1] - beatAge[0] else 0f
+            val v =
+                BeatFx.bounceStretch(beatAge[0], period, beatPower[0], s.f("beatBounceAmount"))
+            if (abs(v) > .002f) c.scale(1f / (1f + v), 1f + v, cx, cy + size * .42f)
+        }
         if (s.b("colorSplit")) {
             // Snare hits split the symbol into red and cyan copies behind it (RGB split).
             val offset = BeatFx.splitOffset(snare, s.f("colorSplitAmount"))
@@ -608,6 +659,9 @@ class VisualRenderer(context: Context) {
             }
         }
         stamp(c, s, t, size, cx, cy, angle, s.f("opacity"), ripple = true)
+        c.restoreToCount(bounceSave)
+        if (s.b("beatOrbit") && s.f("beatOrbitAmount") > 0f)
+            orbitDots(c, cx, cy, size, s.f("beatOrbitAmount"), tertiary)
         if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
             shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
         if (tension > .01f) buildRings(c, cx, cy, size, tension, buildAmount, tertiary)

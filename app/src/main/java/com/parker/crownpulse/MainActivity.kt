@@ -880,6 +880,8 @@ class MainActivity : Activity() {
         toggle("Light rays on bass", "lightRays")
         toggle("Build-up before drops", "buildUp")
         toggle("Tilt on beats", "beatTilt")
+        toggle("Bounce on beats", "beatBounce")
+        toggle("Dots that orbit on the beat", "beatOrbit")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -898,6 +900,8 @@ class MainActivity : Activity() {
             slider("Light ray strength", "lightRaysAmount", 0f, 2f)
             slider("Build-up strength", "buildUpAmount", 0f, 2f)
             slider("Tilt strength", "beatTiltAmount", 0f, 2f)
+            slider("Bounce strength", "beatBounceAmount", 0f, 2f)
+            slider("Orbit dot size", "beatOrbitAmount", 0f, 2f)
         }
         panel.addView(
             text(

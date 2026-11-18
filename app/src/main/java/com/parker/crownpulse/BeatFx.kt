@@ -16,8 +16,8 @@ import kotlin.math.sqrt
  * Pure timing and easing rules for the beat effects (shockwave rings, the punch-in on the
  * first beat of each bar, the snare color split, the note color glow, the hi-hat
  * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops,
- * the light rays on bass, the build-up before drops and the tilt on beats). Everything is a
- * function of music time,
+ * the light rays on bass, the build-up before drops, the tilt on beats, the bounce on beats
+ * and the orbit dots). Everything is a function of music time,
  * so the preview and the export draw identical frames. No Android types and no allocation,
  * so the rules are covered by JVM tests and are safe to call every frame.
  */
@@ -130,6 +130,33 @@ object BeatFx {
 
     /** How long the tilt on a beat takes to settle, in seconds. */
     const val TILT_LIFE = .35f
+
+    /** Largest squash of the symbol on a beat at amount 1 (12 % shorter, 12 % wider). */
+    const val BOUNCE_SQUASH = .12f
+
+    /** One squash-and-rebound swing of the bounce, in seconds. */
+    const val BOUNCE_SWING = .32f
+
+    /** How fast the bounce settles: the swing shrinks as exp(-BOUNCE_DAMP * age). */
+    const val BOUNCE_DAMP = 8f
+
+    /** The bounce is over (and drawn flat) this long after its beat, in seconds. */
+    const val BOUNCE_LIFE = .6f
+
+    /** How early before the next beat the symbol starts stretching up, in seconds. */
+    const val BOUNCE_LEAD = .09f
+
+    /** Dots that orbit the symbol, evenly spaced. */
+    const val ORBIT_DOTS = 4
+
+    /** Steps per full turn of the orbit: one step per beat, a full turn every two bars. */
+    const val ORBIT_STEPS = 8
+
+    /** How long one orbit step takes after its beat, in seconds. */
+    const val ORBIT_STEP_TIME = .22f
+
+    /** How long the orbit dots stay swollen after a beat, in seconds. */
+    const val ORBIT_PULSE_LIFE = .35f
 
     /** Index of the last entry of sorted [times] at or before [t], or -1 when none is. */
     fun lastAtOrBefore(times: FloatArray, t: Float): Int {
@@ -486,4 +513,54 @@ object BeatFx {
                 decay(age, TILT_LIFE)
         return if (odd) -v else v
     }
+
+    /**
+     * Vertical stretch of the symbol [age] seconds after a beat of [strength] (0..1) at
+     * [amount] (0..2), with the next beat expected [period] seconds after the latest one
+     * (0 when unknown). Negative = squashed, positive = stretched; the symbol is drawn
+     * 1 + v tall and 1 / (1 + v) wide, so it keeps its area. It squashes on the beat, swings
+     * back up past its rest shape (the rebound) and settles as a damped spring; in the last
+     * [BOUNCE_LEAD] seconds before the next beat it stretches up a little, so the hit lands
+     * with a snap. Squash and stretch is the classic animation principle; the "stretch as the
+     * beat comes, squash on it, hop on the rebound" order follows the Bounce move described
+     * in the IKANDY user guide. No code copied.
+     */
+    fun bounceStretch(age: Float, period: Float, strength: Float, amount: Float): Float {
+        if (!(age >= 0f)) return 0f
+        val a = BOUNCE_SQUASH * amount.coerceIn(0f, 2f) * (.5f + .5f * strength.coerceIn(0f, 1f))
+        var v = 0f
+        if (age < BOUNCE_LIFE)
+            v -= a * exp(-BOUNCE_DAMP * age) * cos(2f * PI.toFloat() * age / BOUNCE_SWING)
+        if (period > BOUNCE_LEAD * 2f) {
+            val lead = period - age
+            if (lead > 0f && lead < BOUNCE_LEAD) {
+                val u = 1f - lead / BOUNCE_LEAD
+                v += .5f * a * u * u
+            }
+        }
+        return v.coerceIn(-.3f, .3f)
+    }
+
+    /**
+     * Where the orbit dots are, in steps of a 1 / [ORBIT_STEPS] turn, [age] seconds after
+     * beat number [index] (0 = first beat). On each beat they move one step with an
+     * overshoot-and-settle (ease-out-back) and then hold still, so they visibly land on the
+     * beat. Continuous across beats: the end of one step is the start of the next. -1 with
+     * no beat yet.
+     */
+    fun orbitSteps(index: Int, age: Float): Float {
+        if (index < 0 || !(age >= 0f)) return -1f
+        val x = (age / ORBIT_STEP_TIME).coerceIn(0f, 1f) - 1f
+        val c1 = 1.70158f
+        return index + 1f + (c1 + 1f) * x * x * x + c1 * x * x
+    }
+
+    /**
+     * Size boost 0..1.5 of the orbit dots [age] seconds after a beat of [strength] (0..1):
+     * they swell on each beat and shrink back within [ORBIT_PULSE_LIFE]; the first beat of a
+     * bar ([downbeat]) swells them half again as much.
+     */
+    fun orbitPulse(age: Float, strength: Float, downbeat: Boolean): Float =
+        decay(age, ORBIT_PULSE_LIFE) * (.5f + .5f * strength.coerceIn(0f, 1f)) *
+            (if (downbeat) 1.5f else 1f)
 }
