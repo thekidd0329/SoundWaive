@@ -36,6 +36,8 @@ class VisualRenderer(context: Context) {
     private val beatDown = BooleanArray(2)
     /** Seconds since the latest (0) and previous (1) bar line; -1 when there is none. */
     private val barAge = FloatArray(2)
+    /** Whether the latest beat is an odd-numbered one (the tilt on beats leans the other way). */
+    private var beatOdd = false
     // Note color glow: a soft white disc kept as an alpha mask (ALPHA_8), so drawing it takes
     // its color from the paint and any hue costs no new bitmap, shader or filter per frame.
     private val halo: Bitmap = run {
@@ -197,6 +199,7 @@ class VisualRenderer(context: Context) {
         if (override >= 30f || a.beatTimes.isEmpty()) {
             val period = BeatFx.period(if (override >= 30f) override else a.bpm)
             val latest = if (period > 0f) floor(t / period).toInt() else -1
+            beatOdd = latest >= 0 && latest % 2 == 1
             for (k in 0..1) {
                 beatAge[k] = BeatFx.gridAge(t, period, k)
                 barAge[k] = BeatFx.gridAge(t, period * 4, k)
@@ -206,6 +209,7 @@ class VisualRenderer(context: Context) {
             return
         }
         val i = BeatFx.lastAtOrBefore(a.beatTimes, t)
+        beatOdd = i >= 0 && i % 2 == 1
         for (k in 0..1) {
             val j = i - k
             if (j >= 0) {
@@ -252,6 +256,32 @@ class VisualRenderer(context: Context) {
             val r = base + BeatFx.ringTravel(age, BeatFx.BEAT_RING_LIFE) * 430f
             val alpha = (.45f * fade * amount * (.5f + .5f * beatPower[k])).coerceIn(0f, 1f)
             circle(c, cx, cy, r, beatInk, 1.2f + 3f * fade, alpha)
+        }
+    }
+
+    /**
+     * Build-up rings: during the build-up before a drop, a ring falls in from far out onto the
+     * symbol on each of the last two beats, the reverse of the beat rings. They get bolder as
+     * the [tension] rises and fade as they land.
+     */
+    private fun buildRings(
+        c: Canvas,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        tension: Float,
+        amount: Float,
+        color: Int,
+    ) {
+        val base = size * .5f
+        for (k in 0..1) {
+            val age = beatAge[k]
+            if (!(age >= 0f) || age >= BeatFx.BUILD_RING_LIFE) continue
+            val fall = BeatFx.buildRingFall(age)
+            val left = 1f - age / BeatFx.BUILD_RING_LIFE
+            val alpha = (.6f * tension * amount * left).coerceIn(0f, 1f)
+            if (alpha < .01f) continue
+            circle(c, cx, cy, base + (1f - fall) * 900f, color, 1.5f + 5f * tension, alpha)
         }
     }
 
@@ -447,12 +477,28 @@ class VisualRenderer(context: Context) {
         val drop = if (dropAmount > 0f) BeatFx.lastAtOrBefore(a.dropTimes, t) else -1
         dropAge = if (drop >= 0) t - a.dropTimes[drop] else -1f
         dropPower = if (drop >= 0) a.dropStrengths[drop] else 0f
+        // Build-up before drops: tension rises over the seconds before each drop and falls to
+        // 0 on it. Known ahead of time from the song's drops, so preview and export match.
+        val buildAmount = if (s.b("buildUp")) s.f("buildUpAmount") else 0f
+        val tension =
+            if (buildAmount > 0f) BeatFx.buildTension(a.dropTimes, a.dropStrengths, t) else 0f
         // Punch in on the first beat of each bar: a short zoom around the symbol that settles
         // within half a second. The layers zoom; background, grain, vignette and text do not.
         val punchSave = c.save()
         if (s.b("downbeatPunch")) {
             val zoom = BeatFx.punchScale(barAge[0], s.f("punchAmount"))
             if (zoom > 1.0005f) c.scale(zoom, zoom, cx, cy)
+        }
+        if (tension > 0f) {
+            // Slow push-in toward the symbol during a build-up; released on the drop.
+            val zoom = BeatFx.buildZoom(tension, buildAmount)
+            if (zoom > 1.0005f) c.scale(zoom, zoom, cx, cy)
+        }
+        if (s.b("beatTilt")) {
+            // Tilt on beats: the layers lean a little on each beat, alternating left and right.
+            val tilt =
+                BeatFx.tiltDegrees(beatAge[0], beatOdd, beatPower[0], s.f("beatTiltAmount"))
+            if (abs(tilt) > .01f) c.rotate(tilt, cx, cy)
         }
         if (s.b("grid")) grid(c, flow, pal, energy)
         filaments(c, t, a, s, flow, energy, kick, md, pal, detail)
@@ -564,6 +610,7 @@ class VisualRenderer(context: Context) {
         stamp(c, s, t, size, cx, cy, angle, s.f("opacity"), ripple = true)
         if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
             shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
+        if (tension > .01f) buildRings(c, cx, cy, size, tension, buildAmount, tertiary)
         if (dropAmount > 0f) {
             // Drop wave: one wide ring that sweeps past the edges of the frame.
             val fade = BeatFx.decay(dropAge, BeatFx.DROP_LIFE)
@@ -615,6 +662,11 @@ class VisualRenderer(context: Context) {
             }
         }
         c.restoreToCount(punchSave)
+        if (tension > 0f) {
+            // The frame darkens a little as the build-up tightens, so the drop lands brighter.
+            val dark = BeatFx.buildDark(tension, buildAmount)
+            if (dark > .005f) rect(c, -100f, -100f, 1280f, h + 200f, Color.BLACK, dark)
+        }
         if (dropAmount > 0f) {
             // Flash on drops: the whole frame lights up and fades within DROP_LIFE. Drawn a bit
             // past the edges so screen shake never uncovers a strip.

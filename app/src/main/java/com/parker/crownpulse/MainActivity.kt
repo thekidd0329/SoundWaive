@@ -878,6 +878,8 @@ class MainActivity : Activity() {
         toggle("Rainbow edge on bright sounds", "brightFringe")
         toggle("Flash on drops", "dropFlash")
         toggle("Light rays on bass", "lightRays")
+        toggle("Build-up before drops", "buildUp")
+        toggle("Tilt on beats", "beatTilt")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -894,6 +896,8 @@ class MainActivity : Activity() {
             slider("Rainbow edge strength", "brightFringeAmount", 0f, 2f)
             slider("Drop flash strength", "dropFlashAmount", 0f, 2f)
             slider("Light ray strength", "lightRaysAmount", 0f, 2f)
+            slider("Build-up strength", "buildUpAmount", 0f, 2f)
+            slider("Tilt strength", "beatTiltAmount", 0f, 2f)
         }
         panel.addView(
             text(

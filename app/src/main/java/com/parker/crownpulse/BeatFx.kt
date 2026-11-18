@@ -15,8 +15,9 @@ import kotlin.math.sqrt
 /**
  * Pure timing and easing rules for the beat effects (shockwave rings, the punch-in on the
  * first beat of each bar, the snare color split, the note color glow, the hi-hat
- * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops and
- * the light rays on bass). Everything is a function of music time,
+ * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops,
+ * the light rays on bass, the build-up before drops and the tilt on beats). Everything is a
+ * function of music time,
  * so the preview and the export draw identical frames. No Android types and no allocation,
  * so the rules are covered by JVM tests and are safe to call every frame.
  */
@@ -108,6 +109,27 @@ object BeatFx {
 
     /** Ray opacity at amount 1 and full bass. */
     const val RAY_ALPHA = .18f
+
+    /** Longest build-up before a drop, in seconds. */
+    const val BUILD_TIME = 4f
+
+    /** Shortest build-up worth showing, in seconds (drops close together get none). */
+    const val BUILD_MIN = 1f
+
+    /** Extra zoom at the very end of a build-up at amount 1 (6 %). */
+    const val BUILD_ZOOM = .06f
+
+    /** Darkest the frame gets at the end of a build-up at amount 1. */
+    const val BUILD_DARK = .22f
+
+    /** How long a ring takes to fall into the symbol during a build-up, in seconds. */
+    const val BUILD_RING_LIFE = .45f
+
+    /** Largest tilt on a beat at amount 1, in degrees. */
+    const val TILT_DEGREES = 1.5f
+
+    /** How long the tilt on a beat takes to settle, in seconds. */
+    const val TILT_LIFE = .35f
 
     /** Index of the last entry of sorted [times] at or before [t], or -1 when none is. */
     fun lastAtOrBefore(times: FloatArray, t: Float): Int {
@@ -414,4 +436,54 @@ object BeatFx {
 
     /** Half the angle (radians) of each light ray: rays widen with the bass. */
     fun rayHalfAngle(bass: Float): Float = .035f + .05f * bass.coerceIn(0f, 1f)
+
+    /**
+     * Tension 0..1 of the build-up before the next drop at time [t]. Sorted [dropTimes] and
+     * [dropStrengths] come from [findDrops], so the build-up is known ahead of time and the
+     * preview and export match. The build-up starts [BUILD_TIME] seconds before a drop (or
+     * when the previous drop's flash ends, if that is later) and rises as the square of its
+     * progress, so most of the tension comes in the last second. Strong drops get a full
+     * build-up, weak ones half. 0 at and after the drop, and when the build-up would be
+     * shorter than [BUILD_MIN]. The idea of the music "drawing inward and darkening" before
+     * the drop follows the MIT-licensed 5ymph0en1x/Sythm; no code copied.
+     */
+    fun buildTension(dropTimes: FloatArray, dropStrengths: FloatArray, t: Float): Float {
+        if (!t.isFinite()) return 0f
+        val next = lastAtOrBefore(dropTimes, t) + 1
+        if (next >= dropTimes.size || next >= dropStrengths.size) return 0f
+        val drop = dropTimes[next]
+        var start = drop - BUILD_TIME
+        if (next > 0) start = max(start, dropTimes[next - 1] + DROP_LIFE)
+        if (drop - start < BUILD_MIN || t < start || t >= drop) return 0f
+        val u = (t - start) / (drop - start)
+        return (u * u * (.5f + .5f * dropStrengths[next].coerceIn(0f, 1f))).coerceIn(0f, 1f)
+    }
+
+    /** Canvas scale for the build-up push-in at [tension] (0..1) and [amount] (0..2). */
+    fun buildZoom(tension: Float, amount: Float): Float =
+        1f + BUILD_ZOOM * amount.coerceIn(0f, 2f) * tension.coerceIn(0f, 1f)
+
+    /** Opacity 0..1 of the build-up darkening at [tension] (0..1) and [amount] (0..2). */
+    fun buildDark(tension: Float, amount: Float): Float =
+        (BUILD_DARK * amount.coerceIn(0f, 2f) * tension.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+
+    /**
+     * How far (0..1 of its travel) a build-up ring has fallen toward the symbol [age] seconds
+     * after its beat: 0 far out, 1 at the symbol's edge. Same ease-out as the beat rings, in
+     * reverse.
+     */
+    fun buildRingFall(age: Float): Float =
+        if (age >= 0f) easeOut(age / BUILD_RING_LIFE) else 0f
+
+    /**
+     * Tilt in degrees [age] seconds after a beat of [strength] (0..1) at [amount] (0..2).
+     * Every other beat ([odd]) leans the other way, so the picture rocks left and right with
+     * the beat and settles within [TILT_LIFE].
+     */
+    fun tiltDegrees(age: Float, odd: Boolean, strength: Float, amount: Float): Float {
+        val v =
+            TILT_DEGREES * amount.coerceIn(0f, 2f) * (.5f + .5f * strength.coerceIn(0f, 1f)) *
+                decay(age, TILT_LIFE)
+        return if (odd) -v else v
+    }
 }
