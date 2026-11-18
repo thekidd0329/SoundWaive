@@ -1,5 +1,24 @@
 # Changes
 
+## [1.4.0] - 2026-11-18
+
+### Added
+- Beat effects, on by default and listed under **Beat effects** on the Studio screen:
+  - **Rings on every beat:** a thin ring leaves the symbol on each tracked beat and a bolder double ring on the first beat of each bar. Rings use a quadratic ease-out and a cubic fade; beat strength from the grid sets their brightness.
+  - **Punch in on the first beat of each bar:** a short zoom (up to 5 % at the default strength) of the effect layers around the symbol that settles within 0.42 s. Background, grain, vignette and titles stay still.
+  - **Color split on snares:** loud snare hits draw red and cyan copies of the symbol a few pixels to each side (RGB split), scaled by the snare level and off in quiet passages.
+  - **More options** shows a strength slider for each (0 turns it off).
+- **Bass sensitivity** now sits on the Studio screen next to **Beat sensitivity** (same setting as Motion › Bass response).
+- `BeatFx.kt`: pure, allocation-free timing and easing rules for the effects, with JVM tests (`BeatFxTest`).
+
+### Changed
+- The analysis keeps the beat grid as primitive arrays (`beatTimes`, `beatStrengths`, `beatIsDownbeat`, `downbeatTimes`), so effect lookups are binary searches with no per-frame allocation. Without a grid (older analysis files) or with a manual tempo override, the effects follow a fixed 4/4 grid from 0 s, the same rule scene changes use.
+- The symbol's bitmap rectangle is reused instead of allocated on every draw.
+- The **Minimal pulse** preset leaves the color split off.
+
+### Compatibility
+- Saved looks need no migration: looks from 1.3.0 and earlier have no beat-effect keys and get the defaults (all on, strength 1). The three strengths are clamped to 0–2 when a look loads.
+
 ## [1.3.0] - 2026-11-18
 
 ### Fixed

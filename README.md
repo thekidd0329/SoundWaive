@@ -10,6 +10,7 @@ Import a FLAC, choose a look, customize it, and export an MP4 with your music. T
 - Photo, GIF or video backgrounds behind every effect, synced to the music.
 - Render quality: Fast (360p, upscaled), Balanced (720p) or Full.
 - Palettes, background colors, grain, glow, vignette and optional titles.
+- Beat effects locked to the song's beats and bars: rings on every beat, a punch-in on the first beat of each bar and a red/cyan color split on snares.
 - Particle density, echoes, trails, rings, spectrum layers, glitch, drift, rotation, zoom and shake.
 - Flying staves, estimated bass notes, beat sensitivity, frequency gains and timing offset.
 - Randomized variations with a repeatable seed and bar-based scene changes.
