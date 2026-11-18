@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private val mediaWorker = Executors.newSingleThreadExecutor()
     private var mediaSignature = ""
     private var showBackgroundOptions = false
+    private var showBeatOptions = false
     private val main = Handler(Looper.getMainLooper())
     private val cancel = AtomicBoolean(false)
     private lateinit var settings: Settings
@@ -862,8 +863,24 @@ class MainActivity : Activity() {
         input("Tempo override · 0 = detected BPM", "tempoOverride", true)
         select("React to", "reaction", listOf("Full mix", "Bass", "Snare", "Highs", "Energy"))
         slider("Beat sensitivity", "sensitivity", .2f, 2.5f)
+        slider("Bass sensitivity", "bassGain", 0f, 2.5f)
         slider("Visual sync offset", "syncOffset", -500f, 500f, true, " ms")
         select("Preview quality", "quality", listOf("Battery saver", "Balanced", "High"))
+        section("Beat effects", "Locked to the beats and bars found in your song.")
+        toggle("Rings on every beat", "shockwaves")
+        toggle("Punch in on the first beat of each bar", "downbeatPunch")
+        toggle("Color split on snares", "colorSplit")
+        addButtonRow(
+            button(if (showBeatOptions) "Fewer options" else "More options") {
+                showBeatOptions = !showBeatOptions
+                showPage(page)
+            }
+        )
+        if (showBeatOptions) {
+            slider("Ring strength", "shockwaveAmount", 0f, 2f)
+            slider("Punch strength", "punchAmount", 0f, 2f)
+            slider("Color split strength", "colorSplitAmount", 0f, 2f)
+        }
         panel.addView(
             text(
                 "The demo beat is generated for SoundWaive. Imported tracks are analyzed locally by the Rust engine. Bass notes are an estimate for animation.",
