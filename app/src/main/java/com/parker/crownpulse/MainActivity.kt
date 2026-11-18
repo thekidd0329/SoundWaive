@@ -872,6 +872,8 @@ class MainActivity : Activity() {
         toggle("Rings on every beat", "shockwaves")
         toggle("Punch in on the first beat of each bar", "downbeatPunch")
         toggle("Color split on snares", "colorSplit")
+        toggle("Glow that changes color with the notes", "noteGlow")
+        toggle("Sparkles on hi-hats", "sparkles")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -882,6 +884,8 @@ class MainActivity : Activity() {
             slider("Ring strength", "shockwaveAmount", 0f, 2f)
             slider("Punch strength", "punchAmount", 0f, 2f)
             slider("Color split strength", "colorSplitAmount", 0f, 2f)
+            slider("Glow strength", "noteGlowAmount", 0f, 2f)
+            slider("Sparkle amount", "sparkleAmount", 0f, 2f)
         }
         panel.addView(
             text(
