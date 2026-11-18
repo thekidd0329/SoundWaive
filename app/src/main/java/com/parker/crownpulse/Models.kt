@@ -127,6 +127,16 @@ class Settings(var json: JSONObject = JSONObject()) {
     }
 
     private fun sanitize() {
+        // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
+        if (json.has("backgroundImage")) {
+            if (!json.has("backgroundType"))
+                json.put(
+                    "backgroundType",
+                    if (json.optBoolean("backgroundImage")) BackgroundMath.PHOTO
+                    else BackgroundMath.COLOR,
+                )
+            json.remove("backgroundImage")
+        }
         val ranges =
             mapOf(
                 "scale" to (.2..1.65),
@@ -181,6 +191,10 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "bitrate" to listOf("4 Mbps", "8 Mbps", "12 Mbps", "20 Mbps"),
                 "reaction" to listOf("Full mix", "Bass", "Snare", "Highs", "Energy"),
                 "quality" to listOf("Battery saver", "Balanced", "High"),
+                "backgroundType" to BackgroundMath.TYPES,
+                "backgroundFit" to BackgroundMath.FITS,
+                "backgroundEnd" to BackgroundMath.ENDS,
+                "renderQuality" to BackgroundMath.QUALITIES,
             )
         for ((k, allowed) in enums) if (json.has(k) && json.optString(k) !in allowed) json.remove(k)
         for (k in
@@ -192,6 +206,11 @@ class Settings(var json: JSONObject = JSONObject()) {
             } catch (_: Exception) {
                 json.remove(k)
             }
+        if (json.has("backgroundUri")) {
+            val uri = json.optString("backgroundUri")
+            if (uri.length > 2048 || !(uri.isEmpty() || uri.startsWith("content://")))
+                json.remove("backgroundUri")
+        }
         for (k in listOf("title", "subtitle")) if (json.has(k))
             json.put(k, json.optString(k).take(if (k == "title") 48 else 80))
     }
@@ -235,6 +254,14 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "quality",
                 "syncOffset",
                 "tempoOverride",
+                "renderQuality",
+                // The chosen background media belongs to the user, not to a preset.
+                "backgroundType",
+                "backgroundUri",
+                "backgroundUriType",
+                "backgroundFit",
+                "backgroundEnd",
+                "backgroundPulse",
             )
         val retained = sessionKeys.filter { json.has(it) }.associateWith { json.get(it) }
         json = JSONObject()
@@ -402,7 +429,12 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "lockSymbol" to true,
                 "lockColor" to true,
                 "tintArtwork" to true,
-                "backgroundImage" to false,
+                "backgroundType" to BackgroundMath.COLOR,
+                "backgroundUri" to "",
+                "backgroundFit" to BackgroundMath.FILL,
+                "backgroundEnd" to BackgroundMath.LOOP,
+                "backgroundPulse" to true,
+                "renderQuality" to BackgroundMath.BALANCED,
                 "backgroundDim" to .65,
                 "scale" to 1.0,
                 "opacity" to 1.0,

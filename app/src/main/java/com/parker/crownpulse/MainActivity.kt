@@ -23,6 +23,10 @@ class MainActivity : Activity() {
     private val muted = Color.rgb(157, 158, 175)
     private val acid = Color.rgb(221, 247, 93)
     private val worker = Executors.newSingleThreadExecutor()
+    /** Opens/closes background media off the UI thread, independent of analysis/export. */
+    private val mediaWorker = Executors.newSingleThreadExecutor()
+    private var mediaSignature = ""
+    private var showBackgroundOptions = false
     private val main = Handler(Looper.getMainLooper())
     private val cancel = AtomicBoolean(false)
     private lateinit var settings: Settings
@@ -92,6 +96,7 @@ class MainActivity : Activity() {
         )
             dir.deleteRecursively()
         buildUi()
+        refreshBackground()
         loadDemo()
         if (Build.VERSION.SDK_INT >= 33)
             registerReceiver(
@@ -171,7 +176,86 @@ class MainActivity : Activity() {
 
     private fun changed() {
         prefs.edit().putString("settings", settings.json.toString()).apply()
+        refreshBackground()
         preview.invalidate()
+    }
+
+    /**
+     * Reopens the preview background when its kind, file, clip-end rule or photo changes.
+     * Missing media (deleted file, revoked access) falls back to the plain color with a note.
+     */
+    private fun refreshBackground() {
+        val type = settings.s("backgroundType")
+        val signature =
+            when (type) {
+                BackgroundMath.PHOTO -> "$type|${System.identityHashCode(renderer.backdrop)}"
+                BackgroundMath.GIF,
+                BackgroundMath.VIDEO ->
+                    "$type|${settings.s("backgroundUri")}|${settings.s("backgroundEnd")}"
+                else -> type
+            }
+        if (signature == mediaSignature) return
+        mediaSignature = signature
+        val old = renderer.background
+        renderer.background = null
+        val snapshot = settings.copy()
+        val photo = renderer.backdrop
+        mediaWorker.submit {
+            old?.release()
+            val opened =
+                try {
+                    BackgroundMedia.open(
+                        this,
+                        snapshot,
+                        photo,
+                        BackgroundMedia.PREVIEW_SHORT_SIDE,
+                    )
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (mediaSignature == signature)
+                            toast(
+                                "Your background ${type.lowercase()} can't be opened (it may have been moved or deleted). Showing the background color instead."
+                            )
+                    }
+                    null
+                }
+            val live =
+                if (opened is VideoBackground)
+                    LiveVideoBackground(opened) { preview.post { preview.invalidate() } }
+                else opened
+            runOnUiThread {
+                if (mediaSignature == signature && !closing) {
+                    renderer.background = live
+                    preview.invalidate()
+                } else
+                    try {
+                        mediaWorker.submit { live?.release() }
+                    } catch (_: java.util.concurrent.RejectedExecutionException) {
+                        live?.release()
+                    }
+            }
+        }
+    }
+
+    private fun pickBackground(type: String) {
+        if (busy) return
+        when (type) {
+            BackgroundMath.PHOTO -> importImage(true)
+            BackgroundMath.GIF ->
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("image/gif"),
+                    107,
+                )
+            BackgroundMath.VIDEO ->
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("video/*"),
+                    108,
+                )
+        }
     }
 
     private fun buildUi() {
@@ -806,9 +890,39 @@ class MainActivity : Activity() {
         color("Custom accent 1", "accent1")
         color("Custom accent 2", "accent2")
         color("Custom accent 3", "accent3")
-        addButtonRow(button("Import background") { importImage(true) })
-        toggle("Use my background image", "backgroundImage")
-        slider("Background dimming", "backgroundDim", 0f, 1f)
+        section("Background", "Put a color, photo, GIF or video behind everything.")
+        select("Background", "backgroundType", BackgroundMath.TYPES) {
+            val type = settings.s("backgroundType")
+            val missing =
+                when (type) {
+                    BackgroundMath.PHOTO -> renderer.backdrop == null
+                    BackgroundMath.GIF,
+                    BackgroundMath.VIDEO ->
+                        settings.s("backgroundUri").isEmpty() ||
+                            !settings.s("backgroundUriType").equals(type)
+                    else -> false
+                }
+            if (missing) pickBackground(type)
+            showPage(page)
+        }
+        val type = settings.s("backgroundType")
+        if (type != BackgroundMath.COLOR) {
+            addButtonRow(button("Choose a different ${type.lowercase()}") { pickBackground(type) })
+            slider("Dim", "backgroundDim", 0f, 1f)
+            toggle("Pulse with the beat", "backgroundPulse")
+            addButtonRow(
+                button(if (showBackgroundOptions) "Fewer options" else "More options") {
+                    showBackgroundOptions = !showBackgroundOptions
+                    showPage(page)
+                }
+            )
+            if (showBackgroundOptions) {
+                select("Fit", "backgroundFit", BackgroundMath.FITS)
+                if (type != BackgroundMath.PHOTO)
+                    select("When the clip ends", "backgroundEnd", BackgroundMath.ENDS)
+            }
+        }
+        section("Texture")
         slider("Film grain", "grain", 0f, 1f)
         slider("Vignette", "vignette", 0f, 1f)
         toggle("Soft symbol glow", "glow")
@@ -945,6 +1059,7 @@ class MainActivity : Activity() {
         pause()
         startBusy("Preparing export")
         worker.submit {
+            var exportBackground: BackgroundSource? = null
             try {
                 var ready = original
                 if (ready.pcm == null) {
@@ -959,6 +1074,24 @@ class MainActivity : Activity() {
                 val engine = VisualRenderer(this)
                 engine.artwork = renderer.artwork
                 engine.backdrop = renderer.backdrop
+                val (outW, outH) = VideoExporter().dimensions(snapshot)
+                exportBackground =
+                    try {
+                        // A private instance decodes in order, exactly by export time.
+                        BackgroundMedia.open(
+                            this,
+                            snapshot,
+                            renderer.backdrop,
+                            BackgroundMedia.PREVIEW_SHORT_SIDE,
+                            BackgroundMath.Size(outW, outH),
+                        )
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            toast("The background can't be opened; exporting with the color.")
+                        }
+                        null
+                    }
+                engine.background = exportBackground
                 val result =
                     VideoExporter().export(
                         ready,
@@ -993,6 +1126,8 @@ class MainActivity : Activity() {
                     android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
                 } catch (_: Exception) {}
                 fail(e)
+            } finally {
+                exportBackground?.release()
             }
         }
     }
@@ -1092,7 +1227,7 @@ class MainActivity : Activity() {
             file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             if (background) {
                 renderer.backdrop = image
-                settings.set("backgroundImage", true)
+                settings.set("backgroundType", BackgroundMath.PHOTO)
             } else {
                 renderer.artwork = image
                 settings.set("symbol", "Custom artwork")
@@ -1120,6 +1255,22 @@ class MainActivity : Activity() {
             }
             102 -> readImage(uri, false)
             103 -> readImage(uri, true)
+            107,
+            108 -> {
+                try {
+                    // Keep access across restarts so saved looks can reopen the file.
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (_: Exception) {}
+                val type = if (request == 107) BackgroundMath.GIF else BackgroundMath.VIDEO
+                settings.set("backgroundType", type)
+                settings.set("backgroundUri", uri.toString())
+                settings.set("backgroundUriType", type)
+                changed()
+                showPage(page)
+            }
             104 -> renderExport(uri)
             105 -> {
                 currentFocus?.clearFocus()
@@ -1223,6 +1374,11 @@ class MainActivity : Activity() {
         main.removeCallbacks(tick)
         player?.release()
         worker.shutdown()
+        renderer.background.let { old ->
+            renderer.background = null
+            mediaWorker.submit { old?.release() }
+        }
+        mediaWorker.shutdown()
         super.onDestroy()
     }
 

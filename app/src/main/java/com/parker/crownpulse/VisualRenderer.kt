@@ -10,7 +10,14 @@ class VisualRenderer(context: Context) {
     private val crown = BitmapFactory.decodeStream(context.assets.open("crown.png"))
     private val paper = BitmapFactory.decodeStream(context.assets.open("paper.png"))
     var artwork: Bitmap? = null
+    /** Full-size imported photo (source for [PhotoBackground]). */
     var backdrop: Bitmap? = null
+    /** Bottom layer: color, photo, GIF or video frame chosen by music time. */
+    var background: BackgroundSource? = null
+    private val blur = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+    private val blurCanvas = Canvas(blur)
+    private val blurRect = RectF()
+    private val bgRect = RectF()
     private var crownInk: Int? = null
     private var crownFilter: ColorFilter? = null
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -175,19 +182,8 @@ class VisualRenderer(context: Context) {
         c.scale(width / 1080f, width / 1080f)
         c.clipRect(0f, 0f, 1080f, h)
         c.drawColor(bg or (0xff shl 24))
-        if (s.b("backgroundImage"))
-            backdrop?.let {
-                val scale = max(1080f / it.width, h / it.height)
-                val bw = it.width * scale
-                val bh = it.height * scale
-                ink(Color.WHITE, 1 - s.f("backgroundDim"), fill = true)
-                c.drawBitmap(
-                    it,
-                    null,
-                    RectF((1080 - bw) / 2, (h - bh) / 2, (1080 + bw) / 2, (h + bh) / 2),
-                    p,
-                )
-            }
+        if (s.s("backgroundType") != BackgroundMath.COLOR)
+            background?.frame(time)?.let { drawBackground(c, it, s, bass, kick) }
         if (s.f("grain") > 0) {
             ink(white, s.f("grain") * .09f, fill = true)
             c.drawBitmap(paper, null, RectF(0f, 0f, 1080f, h), p)
@@ -370,6 +366,34 @@ class VisualRenderer(context: Context) {
         val fade = 1 - min(fadeIn, fadeOut)
         if (fade > 0) rect(c, 0f, 0f, 1080f, h, bg, fade * fade * (3 - 2 * fade))
         c.restore()
+    }
+
+    /**
+     * Draws the background media as the bottom layer, inside the single render pass, so
+     * dimming, beat reactions, grain, glow, vignette and fades all apply to it.
+     */
+    private fun drawBackground(c: Canvas, img: Bitmap, s: Settings, bass: Float, beat: Float) {
+        val pulse = s.b("backgroundPulse")
+        val fit = s.s("backgroundFit")
+        val alpha = BackgroundMath.visibleAlpha(s.f("backgroundDim"), beat, pulse)
+        val zoom = if (pulse) BackgroundMath.pulseZoom(bass) else 1f
+        if (fit == BackgroundMath.FIT) {
+            // Cheap blur for the empty edges: shrink to 48 px, then stretch with filtering.
+            blurRect.set(0f, 0f, blur.width.toFloat(), blur.height.toFloat())
+            p.reset()
+            p.isFilterBitmap = true
+            blurCanvas.drawBitmap(img, null, blurRect, p)
+            BackgroundMath.place(1, 1, 1080f, h, BackgroundMath.FILL, zoom).let {
+                bgRect.set(it[0], it[1], it[2], it[3])
+            }
+            ink(Color.WHITE, alpha * .7f, fill = true)
+            c.drawBitmap(blur, null, bgRect, p)
+        }
+        BackgroundMath.place(img.width, img.height, 1080f, h, fit, zoom).let {
+            bgRect.set(it[0], it[1], it[2], it[3])
+        }
+        ink(Color.WHITE, alpha, fill = true)
+        c.drawBitmap(img, null, bgRect, p)
     }
 
     private fun symbolPath(type: String) {

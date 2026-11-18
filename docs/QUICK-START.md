@@ -19,7 +19,7 @@ The original look uses your drippy three-point crown, a constant white symbol co
 You can customize:
 
 - **Identity:** nine built-in symbols, no symbol, or your own artwork; color, size, opacity, position and mirroring.
-- **Atmosphere:** eight palettes, custom accent colors, background color or image, grain, vignette and glow.
+- **Atmosphere:** eight palettes, custom accent colors, a color, photo, GIF or video background (Dim and "Pulse with the beat" sit right under it), grain, vignette and glow.
 - **Motion:** drift, rotation, zoom, shake, speed, smoothing, scene changes and variation seed.
 - **Layers:** echoes, trails, rings, filaments, spectrum spokes/bars, grid, glitch strips and particles.
 - **Music notation:** flying staves, note size, layer count and scroll speed.
