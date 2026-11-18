@@ -19,3 +19,6 @@ keystore.properties
 # Recreated from oscillators/noise during the build. Never store private music here.
 app/src/main/assets/generated-demo.*
 generated-demo.sha256
+
+# Python bytecode from tools/
+__pycache__/

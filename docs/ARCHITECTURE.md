@@ -4,8 +4,12 @@ SoundWaive is a native Android application with one Kotlin app module and a Rust
 
 ## Music to video
 
-1. Android's document picker returns the selected audio URI. `AudioEngine.kt` decodes it with `MediaExtractor`/`MediaCodec`, retains the PCM needed for export, and creates a mono 11025 Hz stream for analysis.
-2. `engine/src/lib.rs` computes FFT frequency bands, energy envelopes, transients, tempo and approximate bass pitches. JNI returns the result of writing a versioned `CPULSE01` analysis file.
+1. Android's document picker returns the selected audio URI. `AudioEngine.kt` decodes it with `MediaExtractor`/`MediaCodec`, retains the PCM needed for export, and creates a mono 11025 Hz stream for analysis (`MonoDownsampler.kt` averages input frames, so content above 5.5 kHz does not alias).
+2. The Rust engine computes FFT frequency bands, energy envelopes, transients, tempo, beats and approximate bass pitches. JNI returns the result of writing a versioned `CPULSE01` analysis file.
+   - `engine/src/lib.rs` orchestrates per-frame analysis (hop 256 samples, 43.07 frames/s; frame `f` is centred on time `f * 256 / 11025`). A 2048-sample window serves bands and bass pitch.
+   - `engine/src/onset.rs` runs a 512-sample window on the same grid: positive spectral flux in a bass band (linear magnitude), a body band and an air band (log magnitude with a neighbouring-bin maximum filter). Offline peak picking uses a local-mean and ~1 s median threshold, parabolic sub-frame timing and measured latency correction. Hits become the kick/snare/hat envelopes (0.15 s decay) and the onset list.
+   - `engine/src/beat.rs` estimates tempo by fractional-lag autocorrelation with a harmonic comb and a log-normal prior around 120 BPM, tracks beats by dynamic programming (Ellis 2007), snaps beats to nearby onsets and picks the downbeat phase from bass attacks and beat-synchronous bass-register change.
+   - Analysis file: `CPULSE01`, six header floats, the frame table, notes, onsets, then an optional `SWBEAT01` section (u32 count, then time/strength/downbeat floats per beat). Readers that predate it stop after the onsets.
 3. `Models.kt` validates analysis/settings data. `MainActivity.kt` coordinates playback, controls, saved looks, lifecycle, cancellation and file destinations.
 4. `VisualRenderer.kt` draws a deterministic composition from music time, settings and seed. The same renderer powers preview and export, including custom artwork, crown textures, musical staves, particles and layers.
 5. `VideoExporter.kt` renders timestamped frames through an OpenGL encoder surface and encodes AAC audio. Device encoders constrained to landscape can use a rotated frame plus MP4 orientation metadata. Unsupported combinations produce an actionable error.
@@ -21,6 +25,6 @@ Imported music and generated analysis stay in app-local storage. Export uses a u
 
 ## Testing boundaries
 
-Host Rust tests cover FFT, normalization, tempo and analysis serialization. JVM tests cover timing metadata and non-destructive failure cases. Android lint and real native compilation cover the Android surface. Optional emulator instrumentation exercises decoding, JNI, rendering, export and artwork import using private fixtures.
+Host Rust tests cover FFT, normalization, onset timing, adaptive thresholds, tempo resolution, beat phase, downbeats, silence/short input and analysis serialization. JVM tests cover MP4 timing metadata, analysis-format compatibility, downsampling and non-destructive failure cases. `tools/eval_sync.py` measures onset, kick/snare envelope, tempo, beat and downbeat accuracy on synthetic songs with exact ground truth, including held-out songs not used for tuning. Android lint and real native compilation cover the Android surface. Optional emulator instrumentation exercises decoding, JNI, rendering, export and artwork import using private fixtures.
 
 Numerical beat and pitch estimates are intended for animation. Do not present them as guaranteed transcription. Physical-device codec support, thermal behavior, export speed and long-running memory use need measurement on representative phones.

@@ -115,6 +115,12 @@ class VisualRenderer(context: Context) {
             for (i in times.indices) if (t >= times[i]) j = i
             return modes[j]
         }
+        // Change scenes on tracked bar lines when the analysis has a beat grid; a manual
+        // tempo override (or an older analysis file) keeps the original fixed-length bars.
+        val bar = if (s.f("tempoOverride") >= 30) null else a.barIndex(t)
+        if (bar != null)
+            return ((bar - 1).coerceAtLeast(0) / s.i("sceneBars").coerceAtLeast(1) +
+                s.i("seed") % 5) % 5
         return ((t /
                 (60f / (if (s.f("tempoOverride") >= 30) s.f("tempoOverride") else a.bpm) *
                     4 *

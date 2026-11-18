@@ -1,5 +1,22 @@
 # Changes
 
+## [1.1.0] - 2026-11-17
+
+### Added
+- Beat and bar tracking: tempo is measured to 0.05 BPM by fractional-lag harmonic autocorrelation with a tempo prior, beats follow dynamic programming (Ellis 2007) snapped to detected hits, and downbeats come from bass attacks plus bass-note/chord changes.
+- Optional `SWBEAT01` beat-grid section after the onset list in analysis files. Older builds stop reading before it; the `CPULSE01` layout and JNI contract are unchanged.
+- `tools/eval_sync.py`: reproducible synthetic benchmark (8 tuning + 3 held-out songs with exact ground truth) for kick/snare envelopes, onsets, tempo, beats and downbeats.
+- Rust tests for onset timing, adaptive thresholds, fractional tempo, beat phase, downbeats, silence, short input and file layout; JVM tests for analysis-format compatibility and downsampling.
+
+### Changed
+- Onsets use a dedicated 46 ms window: linear bass-band flux for kicks, vibrato-suppressed log flux for body and air bands, offline adaptive thresholds, sub-frame peak timing and measured latency correction.
+- Snare reactions remove body flux explained by kicks and hats. Particle-burst onsets are the merged kick and snare hits.
+- Scene changes follow tracked bar lines when a beat grid exists; a manual tempo override keeps fixed-length bars.
+
+### Fixed
+- Kick, snare and burst timing no longer lands 10-17 ms before the attack.
+- Android decoding averages samples when converting to 11025 Hz mono instead of picking single samples, so hats and cymbals no longer alias into the snare band.
+
 ## 1.0.1 — SoundWaive repository integration
 
 - Replaced the unreleased song and its analysis with a reproducible generated demo beat.

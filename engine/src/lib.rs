@@ -1,6 +1,14 @@
 //! Deterministic, offline music analysis. No network and no learned model.
+//!
+//! Output is the versioned `CPULSE01` file read by `Models.kt`, optionally followed by a
+//! `SWBEAT01` beat-grid section that older readers ignore (they stop after the onset list).
+pub mod beat;
+pub mod dsp;
+pub mod onset;
+
+use dsp::{fft, hann, load_frame, normalize, quantile, smooth, Complex};
+use onset::{Detection, PickParams, ShortSpectrum};
 use std::{
-    f32::consts::PI,
     fs,
     io::{self, Write},
     path::Path,
@@ -11,122 +19,20 @@ const RATE: f32 = 11025.0;
 const BANDS: usize = 80;
 const WAVES: usize = 256;
 const STRIDE: usize = 8 + BANDS + WAVES;
-#[derive(Clone, Copy, Default)]
-struct Complex {
-    r: f32,
-    i: f32,
-}
-fn fft(a: &mut [Complex]) {
-    let n = a.len();
-    let mut j = 0;
-    for i in 1..n {
-        let mut b = n >> 1;
-        while j & b != 0 {
-            j ^= b;
-            b >>= 1;
-        }
-        j ^= b;
-        if i < j {
-            a.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let ang = -2.0 * PI / len as f32;
-        let wr = ang.cos();
-        let wi = ang.sin();
-        for start in (0..n).step_by(len) {
-            let (mut xr, mut xi) = (1.0, 0.0);
-            for k in 0..len / 2 {
-                let u = a[start + k];
-                let p = a[start + k + len / 2];
-                let v = Complex {
-                    r: p.r * xr - p.i * xi,
-                    i: p.r * xi + p.i * xr,
-                };
-                a[start + k] = Complex {
-                    r: u.r + v.r,
-                    i: u.i + v.i,
-                };
-                a[start + k + len / 2] = Complex {
-                    r: u.r - v.r,
-                    i: u.i - v.i,
-                };
-                let nr = xr * wr - xi * wi;
-                xi = xr * wi + xi * wr;
-                xr = nr;
-            }
-        }
-        len <<= 1;
-    }
-}
-fn quantile(v: &[f32], q: f32) -> f32 {
-    let mut a = v.to_vec();
-    a.sort_by(f32::total_cmp);
-    a[((a.len() - 1) as f32 * q) as usize]
-}
-fn normalize(v: &mut [f32]) {
-    let lo = quantile(v, 0.05);
-    let hi = quantile(v, 0.97).max(lo + 1e-6);
-    for x in v {
-        *x = ((*x - lo) / (hi - lo)).clamp(0.0, 1.0);
-    }
-}
-fn smooth(v: &[f32], attack: f32, release: f32) -> Vec<f32> {
-    let mut z = 0.0;
-    v.iter()
-        .map(|&x| {
-            z += (x - z) * if x > z { attack } else { release };
-            z
-        })
-        .collect()
-}
-fn attacks(v: &[f32], fps: f32) -> Vec<f32> {
-    let mut out = vec![0.0; v.len()];
-    let mut last = 0usize;
-    for i in 2..v.len().saturating_sub(2) {
-        let a = i.saturating_sub((fps * 0.35) as usize);
-        let mean = v[a..i].iter().sum::<f32>() / (i - a).max(1) as f32;
-        if v[i] > mean * 1.45 + 0.065
-            && v[i] >= v[i - 1]
-            && v[i] > v[i + 1]
-            && i - last > (fps * 0.09) as usize
-        {
-            out[i] = v[i];
-            last = i;
-        }
-    }
-    let mut z: f32 = 0.0;
-    for x in &mut out {
-        z = (*x).max(z * (-1.0 / (fps * 0.15)).exp());
-        *x = z;
-    }
-    out
-}
-fn tempo(flux: &[f32], fps: f32) -> f32 {
-    let mut best = (0.0, 120.0);
-    for bpm in 70..181 {
-        let lag = (fps * 60.0 / bpm as f32).round() as usize;
-        if lag >= flux.len() {
-            continue;
-        }
-        let mut score = 0.0;
-        for i in lag..flux.len() {
-            score += flux[i] * flux[i - lag];
-        }
-        score /= (flux.len() - lag) as f32;
-        score *= 1.0 - ((bpm as f32 - 120.0).abs() / 180.0);
-        if score > best.0 {
-            best = (score, bpm as f32);
-        }
-    }
-    best.1
-}
+/// Log bands below ~400 Hz (bass register) used for harmonic-change downbeat cues.
+const BASS_BANDS: usize = 42;
+/// Decay of kick/snare/hat envelopes; `VisualRenderer` derives ring age from it.
+const HIT_DECAY: f32 = 0.15;
+/// Hits weaker than this fraction of a typical strong hit are ignored.
+const HIT_FLOOR: f32 = 0.3;
+/// Trailing extension magic, version 1: u32 count, then count x [time, strength, downbeat].
+pub const BEAT_MAGIC: &[u8; 8] = b"SWBEAT01";
 #[derive(Debug, Clone)]
 pub struct Report {
     pub bpm: f32,
     pub frames: usize,
     pub notes: usize,
+    pub beats: usize,
 }
 pub fn analyze_pcm(input: &Path, output: &Path) -> io::Result<Report> {
     let bytes = fs::read(input)?;
@@ -146,57 +52,41 @@ pub fn analyze_pcm(input: &Path, output: &Path) -> io::Result<Report> {
         .chunks_exact(2)
         .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
         .collect();
-    let frames = (pcm.len() + HOP - 1) / HOP;
+    let frames = pcm.len().div_ceil(HOP);
     let fps = RATE / HOP as f32;
     let mut data = vec![0.0f32; frames * STRIDE];
     let mut low = vec![0.0; frames];
     let mut mid = low.clone();
     let mut high = low.clone();
     let mut rms = low.clone();
-    let mut flux = low.clone();
-    let mut lf = low.clone();
-    let mut hf = low.clone();
     let mut pitches = vec![0; frames];
-    let mut previous = vec![0.0; N / 2];
     let mut a = vec![Complex::default(); N];
     let mut magnitude = vec![0.0; N / 2];
-    let window: Vec<f32> = (0..N)
-        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / (N - 1) as f32).cos())
-        .collect();
+    let window = hann(N);
+    let mut short = ShortSpectrum::new();
+    let mut detection = Detection::with_capacity(frames);
     for f in 0..frames {
         let center = f * HOP;
-        let mut energy = 0.0;
-        for j in 0..N {
-            let at = center as isize + j as isize - (N / 2) as isize;
-            let v = if at >= 0 {
-                *pcm.get(at as usize).unwrap_or(&0.0)
-            } else {
-                0.0
-            };
-            a[j] = Complex {
-                r: v * window[j],
-                i: 0.0,
-            };
-            energy += v * v;
-        }
+        let lo = center.saturating_sub(N / 2);
+        let hi = (center + N / 2).min(pcm.len());
+        let energy: f32 = pcm
+            .get(lo..hi)
+            .map_or(0.0, |w| w.iter().map(|v| v * v).sum());
         rms[f] = (energy / N as f32).sqrt();
+        detection.push(short.flux(&pcm, center));
+        load_frame(&pcm, center, &window, &mut a);
         fft(&mut a);
         for k in 1..N / 2 {
-            let m = (a[k].r * a[k].r + a[k].i * a[k].i).sqrt() / N as f32;
+            let m = a[k].norm() / N as f32;
             magnitude[k] = m;
             let hz = k as f32 * RATE / N as f32;
-            let rise = (m - previous[k]).max(0.0);
             if hz < 220.0 {
                 low[f] += m * m;
-                lf[f] += rise;
             } else if hz < 2200.0 {
                 mid[f] += m * m;
             } else {
                 high[f] += m * m;
-                hf[f] += rise;
             }
-            flux[f] += rise;
-            previous[k] = m;
         }
         low[f] = low[f].sqrt();
         mid[f] = mid[f].sqrt();
@@ -240,19 +130,45 @@ pub fn analyze_pcm(input: &Path, output: &Path) -> io::Result<Report> {
             pitches[f] = best.1;
         }
     }
-    let bpm = tempo(&flux, fps);
-    for v in [
-        &mut low, &mut mid, &mut high, &mut rms, &mut flux, &mut lf, &mut hf,
-    ] {
+    detection.finish();
+    // Bass-register log spectrum (frames x BASS_BANDS) for harmonic-change downbeat cues.
+    let bass_bands: Vec<f32> = data
+        .chunks_exact(STRIDE)
+        .flat_map(|r| r[8..8 + BASS_BANDS].iter().copied())
+        .collect();
+    let mut kicks = onset::pick(&detection.low, fps, PickParams::KICK);
+    let mut snares = onset::pick(&detection.snare, fps, PickParams::SNARE);
+    let mut hats = onset::pick(&detection.high, fps, PickParams::HAT);
+    for p in [&mut kicks, &mut snares, &mut hats] {
+        onset::normalize_strengths(p, HIT_FLOOR);
+    }
+    // Salient hits (kicks and snares/body attacks) drive bursts and beat snapping.
+    let salient = onset::merge(&kicks, &snares, 0.03);
+    let onset_times: Vec<f32> = salient.iter().map(|p| p.time).collect();
+    let grid = beat::grid(
+        &detection.pulse,
+        &detection.low,
+        &bass_bands,
+        BASS_BANDS,
+        &onset_times,
+        fps,
+        onset::LATENCY,
+    );
+    let bpm = grid
+        .as_ref()
+        .map(|g| g.bpm)
+        .or_else(|| beat::tempo(&detection.pulse, fps))
+        .unwrap_or(120.0);
+    for v in [&mut low, &mut mid, &mut high, &mut rms] {
         normalize(v);
     }
     let low = smooth(&low, 0.65, 0.28);
     let mid = smooth(&mid, 0.65, 0.28);
     let high = smooth(&high, 0.8, 0.4);
     let slow = smooth(&rms, 0.025, 0.025);
-    let kick = attacks(&lf, fps);
-    let snare = attacks(&flux, fps);
-    let hat = attacks(&hf, fps);
+    let kick = onset::envelope(&kicks, frames, fps, HIT_DECAY);
+    let snare = onset::envelope(&snares, frames, fps, HIT_DECAY);
+    let hat = onset::envelope(&hats, frames, fps, HIT_DECAY);
     let spectrum: Vec<f32> = data
         .chunks_exact(STRIDE)
         .flat_map(|r| r[8..8 + BANDS].iter().copied())
@@ -292,9 +208,11 @@ pub fn analyze_pcm(input: &Path, output: &Path) -> io::Result<Report> {
             pitch = p;
         }
     }
-    let onsets: Vec<[f32; 2]> = (1..frames)
-        .filter(|&f| snare[f] > 0.26 && snare[f] > snare[f - 1] + 0.03)
-        .map(|f| [f as f32 / fps, snare[f]])
+    // Salient onsets drive particle bursts; tiny ripples are dropped.
+    let onsets: Vec<[f32; 2]> = salient
+        .iter()
+        .filter(|p| p.strength >= 0.25)
+        .map(|p| [p.time, p.strength])
         .collect();
     let mut out = io::BufWriter::new(fs::File::create(output)?);
     out.write_all(b"CPULSE01")?;
@@ -323,11 +241,20 @@ pub fn analyze_pcm(input: &Path, output: &Path) -> io::Result<Report> {
             out.write_all(&v.to_le_bytes())?;
         }
     }
+    let beats = grid.map(|g| g.beats).unwrap_or_default();
+    out.write_all(BEAT_MAGIC)?;
+    out.write_all(&(beats.len() as u32).to_le_bytes())?;
+    for b in &beats {
+        for v in [b.time, b.strength, if b.downbeat { 1.0 } else { 0.0 }] {
+            out.write_all(&v.to_le_bytes())?;
+        }
+    }
     out.flush()?;
     Ok(Report {
         bpm,
         frames,
         notes: notes.len(),
+        beats: beats.len(),
     })
 }
 #[cfg(target_os = "android")]
@@ -351,56 +278,136 @@ pub extern "system" fn Java_com_parker_crownpulse_NativeEngine_analyze(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn fft_finds_sine() {
-        let mut a: Vec<Complex> = (0..N)
-            .map(|i| Complex {
-                r: (2.0 * PI * 32.0 * i as f32 / N as f32).sin(),
-                i: 0.0,
-            })
-            .collect();
-        fft(&mut a);
-        let k = (1..N / 2)
-            .max_by(|&i, &j| {
-                (a[i].r * a[i].r + a[i].i * a[i].i).total_cmp(&(a[j].r * a[j].r + a[j].i * a[j].i))
-            })
-            .unwrap();
-        assert_eq!(k, 32);
-    }
-    #[test]
-    fn silence_remains_finite() {
-        let mut v = vec![0.0; 100];
-        normalize(&mut v);
-        assert!(v.iter().all(|x| x.is_finite() && *x == 0.0));
-    }
-    #[test]
-    fn beat_train_detects_120() {
-        let fps = 43.0664;
-        let mut v = vec![0.0; 4300];
-        for n in 0..200 {
-            let i = (n as f32 * fps * 0.5) as usize;
-            if i < v.len() {
-                v[i] = 1.0;
-            }
+    use std::f32::consts::PI;
+
+    fn write_pcm(path: &Path, samples: impl Iterator<Item = f32>) {
+        let mut pcm = Vec::new();
+        for v in samples {
+            pcm.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
         }
-        assert!((tempo(&v, fps) - 120.0).abs() < 4.0);
+        fs::write(path, pcm).unwrap();
     }
+
+    fn f32_at(b: &[u8], at: usize) -> f32 {
+        f32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+    }
+
+    fn u32_at(b: &[u8], at: usize) -> usize {
+        u32::from_le_bytes(b[at..at + 4].try_into().unwrap()) as usize
+    }
+
+    /// Kick-like pulses on a 120 BPM grid, every fourth one louder with a bass note.
+    fn groove(i: usize) -> f32 {
+        let t = i as f32 / RATE;
+        let beat = 0.5;
+        let k = (t / beat).floor();
+        let age = t - k * beat;
+        let accent = if k as i32 % 4 == 0 { 1.0 } else { 0.6 };
+        let kick = (2.0 * PI * (50.0 * age + 3.0 * (1.0 - (-age / 0.03).exp()))).sin()
+            * (-age / 0.12).exp();
+        let bar = (t / 2.0).floor() as i32;
+        let hz = [82.4, 98.0, 73.4, 110.0][(bar % 4) as usize];
+        let bass = 0.3 * (2.0 * PI * hz * t).sin() * (-(t - bar as f32 * 2.0) / 0.6).exp();
+        0.7 * accent * kick + bass
+    }
+
     #[test]
     fn full_analysis_roundtrip() {
         let root = std::env::temp_dir();
         let input = root.join("crownpulse_test.pcm");
         let output = root.join("crownpulse_test.bin");
-        let mut pcm = Vec::new();
-        for i in 0..44100 {
-            let t = i as f32 / RATE;
-            let envelope = if t % 0.5 < 0.12 { 0.8 } else { 0.12 };
-            let v = ((2.0 * PI * 82.4 * t).sin() * envelope * 32767.0) as i16;
-            pcm.extend_from_slice(&v.to_le_bytes());
-        }
-        fs::write(&input, pcm).unwrap();
+        write_pcm(
+            &input,
+            (0..44100).map(|i| {
+                let t = i as f32 / RATE;
+                let envelope = if t % 0.5 < 0.12 { 0.8 } else { 0.12 };
+                (2.0 * PI * 82.4 * t).sin() * envelope
+            }),
+        );
         let r = analyze_pcm(&input, &output).unwrap();
         assert!(r.frames > 100 && r.notes > 0);
         assert_eq!(&fs::read(&output).unwrap()[..8], b"CPULSE01");
+        let _ = fs::remove_file(input);
+        let _ = fs::remove_file(output);
+    }
+
+    #[test]
+    fn layout_stays_compatible_and_appends_beat_grid() {
+        let root = std::env::temp_dir();
+        let input = root.join("soundwaive_layout.pcm");
+        let output = root.join("soundwaive_layout.bin");
+        write_pcm(&input, (0..(RATE * 20.0) as usize).map(groove));
+        let r = analyze_pcm(&input, &output).unwrap();
+        let b = fs::read(&output).unwrap();
+        // Header exactly as Models.kt expects.
+        assert_eq!(&b[..8], b"CPULSE01");
+        assert_eq!(f32_at(&b, 16), r.bpm);
+        assert_eq!(f32_at(&b, 20) as usize, r.frames);
+        assert_eq!(f32_at(&b, 24), BANDS as f32);
+        assert_eq!(f32_at(&b, 28), WAVES as f32);
+        let mut at = 32 + r.frames * STRIDE * 4;
+        assert_eq!(u32_at(&b, at), r.notes);
+        at += 4 + r.notes * 16;
+        let onsets = u32_at(&b, at);
+        assert!(onsets >= 30, "{onsets} onsets");
+        at += 4 + onsets * 8;
+        assert_eq!(&b[at..at + 8], BEAT_MAGIC);
+        let count = u32_at(&b, at + 8);
+        assert_eq!(count, r.beats);
+        assert_eq!(b.len(), at + 12 + count * 12);
+        assert!((r.bpm - 120.0).abs() < 0.5, "{}", r.bpm);
+        let beats: Vec<(f32, f32)> = (0..count)
+            .map(|i| (f32_at(&b, at + 12 + i * 12), f32_at(&b, at + 20 + i * 12)))
+            .collect();
+        // Beats sit on the 0.5 s grid and downbeats on the accented bar starts.
+        assert!(count >= 36);
+        for (t, down) in &beats {
+            let off = (t / 0.5 - (t / 0.5).round()).abs() * 0.5;
+            // Within one analysis frame (23 ms).
+            assert!(off < 0.02, "beat {t} off grid by {off}");
+            if *down > 0.5 {
+                assert!(
+                    ((t / 2.0) - (t / 2.0).round()).abs() * 2.0 < 0.02,
+                    "downbeat {t}"
+                );
+            }
+        }
+        // Every value in the frame table is finite and normalised.
+        for i in 0..r.frames * STRIDE {
+            let v = f32_at(&b, 32 + i * 4);
+            assert!(v.is_finite());
+        }
+        let _ = fs::remove_file(input);
+        let _ = fs::remove_file(output);
+    }
+
+    #[test]
+    fn analysis_is_deterministic_and_handles_silence() {
+        let root = std::env::temp_dir();
+        let input = root.join("soundwaive_silence.pcm");
+        let (o1, o2) = (
+            root.join("soundwaive_s1.bin"),
+            root.join("soundwaive_s2.bin"),
+        );
+        write_pcm(&input, (0..(RATE * 3.0) as usize).map(|_| 0.0));
+        let r = analyze_pcm(&input, &o1).unwrap();
+        analyze_pcm(&input, &o2).unwrap();
+        assert_eq!(fs::read(&o1).unwrap(), fs::read(&o2).unwrap());
+        assert_eq!(r.beats, 0);
+        assert_eq!(r.bpm, 120.0);
+        for p in [input, o1, o2] {
+            let _ = fs::remove_file(p);
+        }
+    }
+
+    #[test]
+    fn shortest_accepted_input_does_not_panic() {
+        let root = std::env::temp_dir();
+        let input = root.join("soundwaive_short.pcm");
+        let output = root.join("soundwaive_short.bin");
+        write_pcm(&input, (0..1103).map(|i| (i as f32 * 0.3).sin() * 0.5));
+        let r = analyze_pcm(&input, &output).unwrap();
+        assert!(r.frames >= 4);
         let _ = fs::remove_file(input);
         let _ = fs::remove_file(output);
     }
