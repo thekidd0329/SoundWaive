@@ -1,5 +1,22 @@
 # Changes
 
+## [1.8.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Build-up before drops:** in the last 4 s before each drop the layers slowly push in toward the symbol (up to 6 % at the default strength), the frame darkens (up to 22 % black) and a ring falls in from far out onto the symbol on each beat. Tension rises as the square of the build-up's progress, so most of it comes in the last second, and drops to 0 on the drop, where the flash takes over. Strong drops get a full build-up, weak ones half. A build-up never starts before the previous drop's flash has ended, and one shorter than 1 s is skipped. It uses the drops found in 1.7, so it works even with **Flash on drops** off.
+  - **Tilt on beats:** the layers lean up to 1.5 degrees on each beat, alternating left and right, and settle with a cubic decay over 0.35 s. Stronger beats lean further. Background, grain, vignette and titles stay level.
+  - Build-up idea ("draws inward and darkens before the drop") from the MIT-licensed 5ymph0en1x/Sythm; no code copied.
+  - **More options** adds **Build-up strength** and **Tilt strength** (0 turns them off).
+- `BeatFx`: `buildTension`, `buildZoom`, `buildDark`, `buildRingFall` and `tiltDegrees`, with JVM tests.
+
+### Changed
+- Stored looks are now `lookVersion` 6. A look stored before 1.8 loads with the two new switches off, so it looks the same as before; the rules for older looks are unchanged.
+- **Ink storm** keeps both new effects. **Minimal pulse** turns both off.
+
+### Performance
+- The build-up is one binary search over the song's drops per frame, one extra canvas scale, at most two circles and one rectangle. The tilt is one canvas rotate. No per-frame allocation.
+
 ## [1.7.0] - 2026-11-18
 
 ### Added

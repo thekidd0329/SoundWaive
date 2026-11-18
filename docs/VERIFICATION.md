@@ -1,5 +1,11 @@
 # Verification
 
+## 1.8.0 build-up before drops and tilt on beats — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.rotate(degrees, px, py)` and `Canvas.scale(sx, sy, px, py)` pivot around the symbol and are undone by the existing `restoreToCount`).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `buildUpRisesIntoTheDrop`, `noBuildUpRightAfterAnotherDrop`, `tiltRocksBothWaysAndSettles`.
+- Not yet checked: everything on a phone, in particular whether the build-up feels right before real drops, preview and export frame time with all eleven effects on, and that looks saved in 1.7 open with the build-up and tilt off.
+
 ## 1.7.0 flash on drops and light rays on bass — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Path.reset`/`moveTo`/`lineTo`/`close` reuse one native path; `Canvas.drawPath` fills with the paint's color and alpha).

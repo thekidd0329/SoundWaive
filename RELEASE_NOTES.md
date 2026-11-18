@@ -1,5 +1,21 @@
 # SoundWaive release notes
 
+## 1.8.0 — Build-up and beat tilt
+
+**What's new**
+- **Build-up before drops.** In the few seconds before a drop, the picture slowly pushes in on the crown, the screen gets a little darker and rings start falling into the crown on every beat. It all tightens right up to the drop, then lets go as the flash hits.
+- **Tilt on beats.** The crown and its effects lean a little on each beat, left then right, like the camera is rocking with the song.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make the build-up or the tilt stronger or softer.
+
+**Good to know**
+- Looks you saved before 1.8 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- The build-up only shows before the drops SoundWaive finds, so songs without a clear drop won't have one. It works even if you turned **Flash on drops** off.
+- Your background and titles stay level when the picture tilts.
+- Minimal pulse skips both new effects.
+
 ## 1.7.0 — Drop flash and light rays
 
 **What's new**
