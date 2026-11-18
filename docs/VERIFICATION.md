@@ -1,5 +1,11 @@
 # Verification
 
+## 1.9.0 bounce on beats and orbit dots — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.scale(sx, sy, px, py)` pivots on the symbol's base and is undone by `restoreToCount` before the rings are drawn; `Canvas.drawCircle` with a fill paint for the dots).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `bounceSquashesOnTheBeatAndSettles`, `bounceStretchesJustBeforeTheNextBeat`, `orbitStepsLandOnTheBeatAndJoinUp`.
+- Not yet checked: everything on a phone, in particular whether the bounce feels on time on real songs, preview and export frame time with all thirteen effects on, and that looks saved in 1.8 open with the bounce and orbit dots off.
+
 ## 1.8.0 build-up before drops and tilt on beats — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.rotate(degrees, px, py)` and `Canvas.scale(sx, sy, px, py)` pivot around the symbol and are undone by the existing `restoreToCount`).
