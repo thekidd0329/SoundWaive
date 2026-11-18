@@ -1,7 +1,8 @@
 //! Tempo estimation and beat/downbeat tracking on an onset-strength function.
 //!
 //! Tempo: autocorrelation of the high-passed detection function, scored with a
-//! harmonic comb at fractional lags (0.05 BPM steps) and a log-normal tempo prior.
+//! harmonic comb at fractional lags (0.05 BPM steps, cubic interpolation, parabolic
+//! refinement) and a log-normal tempo prior, then an octave check against the onsets.
 //! Beats: Ellis-style dynamic programming, which follows gradual tempo drift and locks
 //! the phase to actual hits. Downbeats: the bar phase whose beats carry the most bass
 //! attack and low-register harmonic change.
@@ -48,13 +49,107 @@ fn autocorrelation(x: &[f32], max_lag: usize) -> Vec<f32> {
     r.iter().map(|v| v / r0).collect()
 }
 
+/// Catmull-Rom interpolation of `r` at a fractional lag. Linear interpolation can only
+/// peak exactly on an integer lag, which pinned estimates to `fps * 60 / k` (e.g. 69.84
+/// instead of 70.0, or 143.6/136.0 around 140 BPM).
 fn interp(r: &[f32], lag: f32) -> f32 {
     let i = lag.floor() as usize;
-    if i + 1 >= r.len() {
+    if i + 2 >= r.len() {
         return 0.0;
     }
     let f = lag - i as f32;
-    r[i] * (1.0 - f) + r[i + 1] * f
+    let (p0, p1, p2, p3) = (r[i.saturating_sub(1)], r[i], r[i + 1], r[i + 2]);
+    let c1 = p2 - p0;
+    let c2 = 2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3;
+    let c3 = 3.0 * (p1 - p2) + p3 - p0;
+    p1 + 0.5 * f * (c1 + f * (c2 + f * c3))
+}
+
+/// Log-normal tempo prior (Ellis 2007, librosa): 1.0 at `PRIOR_CENTER`, falling per octave.
+fn prior(bpm: f32) -> f32 {
+    let octaves = (bpm / PRIOR_CENTER).log2() / PRIOR_OCTAVES;
+    (-0.5 * octaves * octaves).exp()
+}
+
+/// Harmonic-comb score of a tempo: a real period also correlates at 2x, 3x, 4x its lag.
+fn comb(r: &[f32], fps: f32, bpm: f32) -> f32 {
+    let lag = fps * 60.0 / bpm;
+    let mut score = 0.0;
+    for (h, w) in [(1.0, 1.0), (2.0, 0.5), (3.0, 0.33), (4.0, 0.25)] {
+        score += w * interp(r, lag * h);
+    }
+    score * prior(bpm)
+}
+
+/// Strongest onset value within one frame of a (fractional) frame position.
+fn peak_near(x: &[f32], pos: f32) -> f32 {
+    let i = pos.max(0.0).round() as usize;
+    let a = i.saturating_sub(1);
+    let b = (i + 2).min(x.len());
+    if a >= b {
+        return 0.0;
+    }
+    x[a..b].iter().copied().fold(0.0, f32::max)
+}
+
+/// Mean onset value on the grid `start + k * period` across the whole signal.
+fn grid_mean(x: &[f32], start: f32, period: f32) -> f32 {
+    let mut sum = 0.0f32;
+    let mut count = 0usize;
+    let mut k = 0usize;
+    loop {
+        let t = start + k as f32 * period;
+        if t >= x.len() as f32 {
+            break;
+        }
+        sum += peak_near(x, t);
+        count += 1;
+        k += 1;
+    }
+    sum / count.max(1) as f32
+}
+
+/// (on, off): mean onset strength on a beat grid of `period` frames at its strongest
+/// phase, and at the midpoints between those beats.
+fn grid_profile(x: &[f32], period: f32) -> (f32, f32) {
+    let mut best = (0.0f32, 0.0f32);
+    let mut phase = 0.0f32;
+    while phase < period {
+        let on = grid_mean(x, phase, period);
+        if on > best.0 {
+            best = (on, phase);
+        }
+        phase += 1.0;
+    }
+    (best.0, grid_mean(x, best.1 + 0.5 * period, period))
+}
+
+/// Double-time beats must carry at least this share of the on-beat onset strength.
+const DOUBLE_SUPPORT: f32 = 0.25;
+/// Alternate beats weaker than this share of the strong beats suggest half time.
+const HALF_SUPPORT: f32 = 0.5;
+
+/// Picks the musically likely octave of `bpm`. The comb favours the slowest consistent
+/// period (its harmonics land on bars), so a half-time trap groove at 140 scores as 70.
+/// Move to the octave the prior prefers only when the onsets agree: doubling needs real
+/// attacks halfway between the slow beats; halving needs every other beat to be weak.
+fn choose_octave(x: &[f32], fps: f32, bpm: f32) -> f32 {
+    let period = fps * 60.0 / bpm;
+    let double = bpm * 2.0;
+    if double <= MAX_BPM && prior(double) > prior(bpm) {
+        let (on, off) = grid_profile(x, period * 0.5);
+        if on > 0.0 && off >= DOUBLE_SUPPORT * on {
+            return double;
+        }
+    }
+    let half = bpm * 0.5;
+    if half >= MIN_BPM && prior(half) > prior(bpm) {
+        let (on, off) = grid_profile(x, period * 2.0);
+        if on > 0.0 && off < HALF_SUPPORT * on {
+            return half;
+        }
+    }
+    bpm
 }
 
 /// Global tempo in BPM, or `None` when the signal has no periodic pulse to speak of.
@@ -65,23 +160,31 @@ pub fn tempo(odf: &[f32], fps: f32) -> Option<f32> {
         return None;
     }
     let r = autocorrelation(&x, max_lag);
-    let mut best = (f32::MIN, 0.0f32);
-    let steps = ((MAX_BPM - MIN_BPM) / 0.05).round() as usize;
+    const STEP: f32 = 0.05;
+    let steps = ((MAX_BPM - MIN_BPM) / STEP).round() as usize;
+    let at = |s: usize| MIN_BPM + s as f32 * STEP;
+    let mut best = (f32::MIN, 0usize);
     for s in 0..=steps {
-        let bpm = MIN_BPM + s as f32 * 0.05;
-        let lag = fps * 60.0 / bpm;
-        // Harmonic comb: a real period also correlates at 2x, 3x, 4x its lag.
-        let mut score = 0.0;
-        for (h, w) in [(1.0, 1.0), (2.0, 0.5), (3.0, 0.33), (4.0, 0.25)] {
-            score += w * interp(&r, lag * h);
-        }
-        let octaves = (bpm / PRIOR_CENTER).log2() / PRIOR_OCTAVES;
-        score *= (-0.5 * octaves * octaves).exp();
+        let score = comb(&r, fps, at(s));
         if score > best.0 {
-            best = (score, bpm);
+            best = (score, s);
         }
     }
-    (best.0 > 0.0).then_some(best.1)
+    if best.0 <= 0.0 {
+        return None;
+    }
+    // Sub-step refinement: parabola through the winning score and its neighbours.
+    let s = best.1;
+    let mut bpm = at(s);
+    if s > 0 && s < steps {
+        let a = comb(&r, fps, at(s - 1));
+        let c = comb(&r, fps, at(s + 1));
+        let d = a - 2.0 * best.0 + c;
+        if d < 0.0 {
+            bpm += STEP * (0.5 * (a - c) / d).clamp(-0.5, 0.5);
+        }
+    }
+    Some(choose_octave(&x, fps, bpm))
 }
 
 /// Dynamic-programming beat tracker. Returns beat frames (integer) on `odf`'s grid.
@@ -228,7 +331,12 @@ pub fn grid(
         })
         .collect();
     let times: Vec<f32> = beats.iter().map(|b| b.time).collect();
-    let bpm = fitted_bpm(&times).unwrap_or(bpm0);
+    // The fit only refines the comb estimate. On short clips a few beats tracked onto
+    // syncopated hits can tilt the slope by 2-3 % (the 12 s 140 BPM preview read 68.3),
+    // so a fit that disagrees by more than 1 % is not trusted.
+    let bpm = fitted_bpm(&times)
+        .filter(|f| (f - bpm0).abs() <= 0.01 * bpm0)
+        .unwrap_or(bpm0);
     let phase = downbeat_phase(&frames, bass_attack, bass_bands, width, fps * 60.0 / bpm);
     for (i, b) in beats.iter_mut().enumerate() {
         b.downbeat = i % 4 == phase;
@@ -324,6 +432,68 @@ mod tests {
         let fps = 43.0664;
         let (v, _) = pulses(fps, 120.0, 100.0, 0.0);
         assert!((tempo(&v, fps).unwrap() - 120.0).abs() < 0.5);
+    }
+
+    /// Repeating one-bar (4-beat) pattern of `(beat position, strength)` hits.
+    fn bar_pattern(fps: f32, bpm: f32, seconds: f32, hits: &[(f32, f32)]) -> Vec<f32> {
+        let n = (seconds * fps) as usize;
+        let mut v = vec![0.0f32; n];
+        let beat = 60.0 / bpm;
+        let mut bar = 0;
+        while bar as f32 * 4.0 * beat < seconds {
+            for &(at, strength) in hits {
+                let pos = (bar as f32 * 4.0 + at) * beat * fps;
+                let i = pos.floor() as usize;
+                let f = pos - i as f32;
+                if i + 1 < n {
+                    v[i] += strength * (1.0 - f);
+                    v[i + 1] += strength * f;
+                }
+            }
+            bar += 1;
+        }
+        v
+    }
+
+    /// Trap at 140: kicks on 1, the "a" of 1 and the "and" of 3, one snare on 3.
+    const TRAP: [(f32, f32); 4] = [(0.0, 1.0), (0.75, 0.9), (2.0, 0.5), (2.5, 0.9)];
+
+    #[test]
+    fn half_time_trap_reads_140_not_70() {
+        let fps = 43.0664;
+        for seconds in [12.0, 30.0] {
+            let v = bar_pattern(fps, 140.0, seconds, &TRAP);
+            let bpm = tempo(&v, fps).unwrap();
+            assert!((bpm - 140.0).abs() < 0.7, "{seconds} s: {bpm}");
+        }
+    }
+
+    #[test]
+    fn slow_ballad_is_not_doubled() {
+        // Kick on 1 and the "and" of 3, snare on 2 and 4, nothing on the 16ths.
+        let fps = 43.0664;
+        let hits = [(0.0, 0.6), (1.0, 0.35), (2.5, 0.6), (3.0, 0.35)];
+        let v = bar_pattern(fps, 76.0, 40.0, &hits);
+        let bpm = tempo(&v, fps).unwrap();
+        assert!((bpm - 76.0).abs() < 0.5, "{bpm}");
+    }
+
+    #[test]
+    fn short_clip_tempo_is_precise() {
+        // The 140 BPM preview was 12 s long; integer-lag pinning read 2.5 % low.
+        let fps = 43.0664;
+        let (v, truth) = pulses(fps, 140.0, 12.0, 0.2);
+        assert!((tempo(&v, fps).unwrap() - 140.0).abs() < 0.3);
+        let g = grid(&v, &v, &[], 0, &truth, fps, 0.0).unwrap();
+        assert!((g.bpm - 140.0).abs() < 0.3, "{}", g.bpm);
+    }
+
+    #[test]
+    fn interpolation_passes_through_samples() {
+        let r = [0.0, 0.2, 0.9, 0.4, 0.1, 0.0];
+        for (i, v) in r.iter().enumerate().take(r.len() - 2) {
+            assert!((interp(&r, i as f32) - v).abs() < 1e-6);
+        }
     }
 
     #[test]
