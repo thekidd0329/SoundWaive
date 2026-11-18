@@ -1,5 +1,23 @@
 # Changes
 
+## [1.7.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Flash on drops:** when the song jumps from a quieter stretch into a loud one (a drop, a big chorus), the whole frame flashes and one wide wave sweeps from the symbol past the edges of the screen. Both fade with a cubic decay over 0.7 s. Drops are found once per song from loudness and bass (`0.6 * rms + 0.4 * low`): each frame's next 0.35 s is compared with its previous 2 s, and a jump of at least 0.22 up to a level of at least 0.5 counts. At most one drop every 6 s (the bigger jump wins), and a drop within 0.12 s of a tracked beat lands on that beat. Brightest flash is 45 % white at the default strength.
+  - **Light rays on bass:** twelve beams fan out from behind the symbol and slowly turn with the music when the bass passes 0.3, brighter and wider as it rises (every other beam is narrower). They use the palette's second color.
+  - Drop idea from the MIT-licensed le-director/director-signals ("drop impact": short window after against a longer one before) and 5ymph0en1x/Sythm (flash and shockwave on drops); no code copied.
+  - **More options** adds **Drop flash strength** and **Light ray strength** (0 turns them off).
+- `BeatFx`: `findDrops`, `dropFlash`, `rayAlpha` and `rayHalfAngle`, with JVM tests.
+- `Analysis.dropTimes`, `dropStrengths`: the song's drops as primitive arrays, found when the song loads.
+
+### Changed
+- Stored looks are now `lookVersion` 5. A look stored before 1.7 loads with the two new switches off, so it looks the same as before; the rules for older looks are unchanged.
+- **Ink storm** keeps both new effects (they use its own black and white colors). **Minimal pulse** turns both off.
+
+### Performance
+- Drop finding is one pass with prefix sums when the song loads; per frame it is a binary search. The rays are one reused `Path` and one draw call, drawn only while the bass is up; the flash is one rectangle for 0.7 s after a drop. No per-frame allocation.
+
 ## [1.6.0] - 2026-11-18
 
 ### Added

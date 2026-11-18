@@ -1,5 +1,20 @@
 # SoundWaive release notes
 
+## 1.7.0 — Drop flash and light rays
+
+**What's new**
+- **Flash on drops.** When your song hits a drop or a big loud section, the screen flashes and a big wave rushes out from the crown. It finds the drops on its own and lines them up with the beat.
+- **Light rays on bass.** Beams of light fan out from behind the crown when the bass comes in, and get brighter and wider the harder it hits.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make the flash or the rays stronger or softer.
+
+**Good to know**
+- Looks you saved before 1.7 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- Songs without a clear jump in loudness may have no flash at all, and there is never more than one flash every 6 seconds.
+- Minimal pulse skips both new effects.
+
 ## 1.6.0 — Ripples and rainbow edges
 
 **What's new**
