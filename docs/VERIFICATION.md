@@ -6,6 +6,11 @@
 - New JVM tests for the owner to run (`./gradlew :app:testDebugUnitTest`): `BeatFxTest` (beat lookup, beat/bar ages on the tracked and fixed grids, cubic fade, ease-out ring travel, bounded punch-in, snare color-split threshold) and new assertions in `AnalysisFormatTest.beatGridIsParsedAndCountsBars` / `legacyFileWithoutBeatGridStillLoads` for the primitive beat arrays.
 - Not yet checked: everything on a phone, in particular that preview and export show the same rings/punch/split, frame time with all three effects on, and how the effects read on real songs with weak or missing downbeats.
 
+## 1.3.1 tempo octave review fix — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it.
+- New Rust tests to run (`cd engine && cargo test`): `straight_quarters_at_70_are_doubled_to_140`, `straight_quarter_140_reads_140` (12 s and 30 s), `syncopated_76_is_not_doubled`. The existing trap and ballad tests are unchanged.
+
 ## 1.3.0 tempo octave and GPU export — November 18, 2026
 
 - Per the owner's rule for this release, nothing was compiled, tested or rendered on the build box. The code was checked by reading it against the existing sources and the Android/Rust API documentation only.

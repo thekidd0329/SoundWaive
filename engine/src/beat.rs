@@ -2,7 +2,8 @@
 //!
 //! Tempo: autocorrelation of the high-passed detection function, scored with a
 //! harmonic comb at fractional lags (0.05 BPM steps, cubic interpolation, parabolic
-//! refinement) and a log-normal tempo prior, then an octave check against the onsets.
+//! refinement) and a log-normal tempo prior, then an octave check against the onsets
+//! (midpoints of the slow beats for straight double time, sixteenths for half-time feel).
 //! Beats: Ellis-style dynamic programming, which follows gradual tempo drift and locks
 //! the phase to actual hits. Downbeats: the bar phase whose beats carry the most bass
 //! attack and low-register harmonic change.
@@ -92,26 +93,34 @@ fn peak_near(x: &[f32], pos: f32) -> f32 {
     x[a..b].iter().copied().fold(0.0, f32::max)
 }
 
-/// Mean onset value on the grid `start + k * period` across the whole signal.
-fn grid_mean(x: &[f32], start: f32, period: f32) -> f32 {
-    let mut sum = 0.0f32;
-    let mut count = 0usize;
+/// Onset values on the grid `start + k * period` across the whole signal, one per point.
+fn grid_values(x: &[f32], start: f32, period: f32) -> Vec<f32> {
+    let mut values = Vec::new();
     let mut k = 0usize;
     loop {
         let t = start + k as f32 * period;
         if t >= x.len() as f32 {
             break;
         }
-        sum += peak_near(x, t);
-        count += 1;
+        values.push(peak_near(x, t));
         k += 1;
     }
-    sum / count.max(1) as f32
+    values
 }
 
-/// (on, off): mean onset strength on a beat grid of `period` frames at its strongest
-/// phase, and at the midpoints between those beats.
-fn grid_profile(x: &[f32], period: f32) -> (f32, f32) {
+fn mean(v: &[f32]) -> f32 {
+    v.iter().sum::<f32>() / v.len().max(1) as f32
+}
+
+/// Mean onset value on the grid `start + k * period` across the whole signal.
+fn grid_mean(x: &[f32], start: f32, period: f32) -> f32 {
+    mean(&grid_values(x, start, period))
+}
+
+/// (on, mid): onset values on a beat grid of `period` frames at its strongest phase,
+/// one per beat, and at the midpoints halfway between consecutive beats of that grid
+/// (the same phase shifted by half a period).
+fn grid_profile(x: &[f32], period: f32) -> (Vec<f32>, Vec<f32>) {
     let mut best = (0.0f32, 0.0f32);
     let mut phase = 0.0f32;
     while phase < period {
@@ -121,31 +130,60 @@ fn grid_profile(x: &[f32], period: f32) -> (f32, f32) {
         }
         phase += 1.0;
     }
-    (best.0, grid_mean(x, best.1 + 0.5 * period, period))
+    (
+        grid_values(x, best.1, period),
+        grid_values(x, best.1 + 0.5 * period, period),
+    )
 }
 
-/// Double-time beats must carry at least this share of the on-beat onset strength.
+/// Midpoint (or subdivision) attacks must carry at least this share of the mean
+/// on-beat onset strength to count as support for the double tempo.
 const DOUBLE_SUPPORT: f32 = 0.25;
+/// Share of midpoints that must carry such an attack before they count as beats of
+/// their own. Occasional off-beat hits (a kick on the "and" of 2 or 3) are syncopation.
+const MIDPOINT_COVERAGE: f32 = 0.75;
 /// Alternate beats weaker than this share of the strong beats suggest half time.
 const HALF_SUPPORT: f32 = 0.5;
 
 /// Picks the musically likely octave of `bpm`. The comb favours the slowest consistent
-/// period (its harmonics land on bars), so a half-time trap groove at 140 scores as 70.
-/// Move to the octave the prior prefers only when the onsets agree: doubling needs real
-/// attacks halfway between the slow beats; halving needs every other beat to be weak.
+/// period (its harmonics land on bars), so a 140 BPM groove with accented 1 and 3, or a
+/// half-time trap groove, can score as 70. Octaves are only considered in the direction
+/// the tempo prior prefers, and only when the onsets agree:
+///
+/// Doubling (period P -> P/2) needs either
+/// - straight double time: the midpoints halfway between the slow beats (phase + P/2)
+///   carry real attacks nearly every time (`MIDPOINT_COVERAGE`), each at least
+///   `DOUBLE_SUPPORT` of the mean on-beat strength. A slow groove whose off-beats are
+///   only occasionally hit is syncopated, not double time, and stays slow; or
+/// - half-time feel: the rhythm is written in sixteenths of the slow beat (attacks at
+///   phase + P/4 relative to the eighth-note grid), i.e. eighths of the double tempo.
+///   This is the trap case (hats and kicks on the fast grid, snare once per slow beat
+///   pair); a slow ballad with nothing on the sixteenths stays slow.
+///
+/// Halving (period P -> 2P) needs every other beat to be weak: the midpoints of the
+/// 2P grid are exactly the alternate beats of the P grid.
 fn choose_octave(x: &[f32], fps: f32, bpm: f32) -> f32 {
     let period = fps * 60.0 / bpm;
     let double = bpm * 2.0;
     if double <= MAX_BPM && prior(double) > prior(bpm) {
-        let (on, off) = grid_profile(x, period * 0.5);
-        if on > 0.0 && off >= DOUBLE_SUPPORT * on {
+        let (on, mid) = grid_profile(x, period);
+        let on = mean(&on);
+        // Value reached by all but the weakest (1 - MIDPOINT_COVERAGE) of the midpoints.
+        let typical_mid = quantile(&mid, 1.0 - MIDPOINT_COVERAGE);
+        if on > 0.0 && typical_mid >= DOUBLE_SUPPORT * on {
+            return double;
+        }
+        let (eighths, sixteenths) = grid_profile(x, period * 0.5);
+        let eighths = mean(&eighths);
+        if eighths > 0.0 && mean(&sixteenths) >= DOUBLE_SUPPORT * eighths {
             return double;
         }
     }
     let half = bpm * 0.5;
     if half >= MIN_BPM && prior(half) > prior(bpm) {
-        let (on, off) = grid_profile(x, period * 2.0);
-        if on > 0.0 && off < HALF_SUPPORT * on {
+        let (strong, alternate) = grid_profile(x, period * 2.0);
+        let strong = mean(&strong);
+        if strong > 0.0 && mean(&alternate) < HALF_SUPPORT * strong {
             return half;
         }
     }
@@ -476,6 +514,44 @@ mod tests {
         let v = bar_pattern(fps, 76.0, 40.0, &hits);
         let bpm = tempo(&v, fps).unwrap();
         assert!((bpm - 76.0).abs() < 0.5, "{bpm}");
+    }
+
+    /// Kick on every beat at 140 with the 2 and 4 softer (accented 1 and 3): the comb can
+    /// read this as 70, and the octave check must recognise the soft beats as beats.
+    const STRAIGHT_140: [(f32, f32); 4] = [(0.0, 1.0), (1.0, 0.5), (2.0, 1.0), (3.0, 0.5)];
+
+    #[test]
+    fn straight_quarters_at_70_are_doubled_to_140() {
+        // Regression: the doubling check used to look between the fast beats (eighths of
+        // 140), found nothing there and kept 70. 42 fps puts every 140 BPM beat on a frame.
+        let fps = 42.0;
+        let v = bar_pattern(fps, 140.0, 30.0, &STRAIGHT_140);
+        let x = emphasise(&v, fps);
+        let bpm = choose_octave(&x, fps, 70.0);
+        assert!((bpm - 140.0).abs() < 1e-3, "{bpm}");
+    }
+
+    #[test]
+    fn straight_quarter_140_reads_140() {
+        let fps = 43.0664;
+        for seconds in [12.0, 30.0] {
+            let v = bar_pattern(fps, 140.0, seconds, &STRAIGHT_140);
+            let bpm = tempo(&v, fps).unwrap();
+            assert!((bpm - 140.0).abs() < 0.7, "{seconds} s: {bpm}");
+        }
+    }
+
+    #[test]
+    fn syncopated_76_is_not_doubled() {
+        // Kick on 1 and the "and" of 2, snare on 2 and 4: one off-beat attack per bar is
+        // syncopation, not double time, and there is nothing on the sixteenths.
+        let fps = 43.0664;
+        let hits = [(0.0, 1.0), (1.0, 0.6), (1.5, 0.7), (3.0, 0.6)];
+        let v = bar_pattern(fps, 76.0, 40.0, &hits);
+        let bpm = tempo(&v, fps).unwrap();
+        assert!((bpm - 76.0).abs() < 0.5, "{bpm}");
+        let x = emphasise(&v, fps);
+        assert!((choose_octave(&x, fps, 76.0) - 76.0).abs() < 1e-3);
     }
 
     #[test]
