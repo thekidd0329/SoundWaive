@@ -814,7 +814,7 @@ class MainActivity : Activity() {
             text(
                 if (a == null) "Offline music visualizer"
                 else
-                    "${formatTime(a.duration)}  ·  ${a.bpm.toInt()} BPM estimate  ·  ${a.notes.size} bass notes",
+                    "${formatTime(a.duration)}  ·  ${a.bpm.roundToInt()} BPM estimate  ·  ${a.notes.size} bass notes",
                 12f,
                 muted,
             ),

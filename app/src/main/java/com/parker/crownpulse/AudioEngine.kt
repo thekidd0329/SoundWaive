@@ -72,6 +72,11 @@ class AudioEngine(private val context: Context) {
             var totalFrames = 0L
             var downsampler = MonoDownsampler(rate)
             var lastProgress = 0L
+            // Reused per-buffer scratch: samples are read in bulk and written in one call.
+            var output = ByteArray(0)
+            var monoOut = ByteArray(0)
+            var shorts = ShortArray(0)
+            var floats = FloatArray(0)
             BufferedOutputStream(FileOutputStream(pcm), 262144).use { raw ->
                 BufferedOutputStream(FileOutputStream(mono), 65536).use { down ->
                     while (!outDone) {
@@ -121,29 +126,41 @@ class AudioEngine(private val context: Context) {
                                     b.position(info.offset)
                                     b.limit(info.offset + info.size)
                                     b.order(ByteOrder.LITTLE_ENDIAN)
-                                    val frameBytes =
-                                        channels *
-                                            if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
-                                    val output = ByteArray(info.size.coerceAtLeast(1))
+                                    val isFloat = encoding == AudioFormat.ENCODING_PCM_FLOAT
+                                    val frames = info.size / (channels * if (isFloat) 4 else 2)
+                                    val count = frames * channels
+                                    if (output.size < count * 2) output = ByteArray(count * 2)
+                                    if (monoOut.size < frames * 2) monoOut = ByteArray(frames * 2)
+                                    if (isFloat) {
+                                        if (floats.size < count) floats = FloatArray(count)
+                                        b.asFloatBuffer().get(floats, 0, count)
+                                    } else {
+                                        if (shorts.size < count) shorts = ShortArray(count)
+                                        b.asShortBuffer().get(shorts, 0, count)
+                                    }
                                     var at = 0
-                                    while (b.remaining() >= frameBytes) {
+                                    var m = 0
+                                    var i = 0
+                                    repeat(frames) {
                                         var sum = 0.0
                                         repeat(channels) {
                                             val v =
-                                                if (encoding == AudioFormat.ENCODING_PCM_FLOAT)
-                                                    (b.float.coerceIn(-1f, 1f) * 32767).toInt()
-                                                else b.short.toInt()
+                                                if (isFloat)
+                                                    (floats[i].coerceIn(-1f, 1f) * 32767).toInt()
+                                                else shorts[i].toInt()
+                                            i++
                                             output[at++] = v.toByte()
                                             output[at++] = (v shr 8).toByte()
                                             sum += v
                                         }
                                         downsampler.push(sum / channels)?.let { v ->
-                                            down.write(v and 255)
-                                            down.write((v shr 8) and 255)
+                                            monoOut[m++] = v.toByte()
+                                            monoOut[m++] = (v shr 8).toByte()
                                         }
-                                        totalFrames++
                                     }
+                                    totalFrames += frames
                                     raw.write(output, 0, at)
+                                    down.write(monoOut, 0, m)
                                     outDone =
                                         info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                                     decoder.releaseOutputBuffer(index, false)
@@ -173,7 +190,7 @@ class AudioEngine(private val context: Context) {
             if (cancel.get()) throw InterruptedException("Canceled")
             val analysis = Analysis.load(analyzed)
             mono.delete()
-            progress("Ready · ${analysis.bpm.toInt()} BPM", 1f)
+            progress("Ready · ${analysis.bpm.roundToInt()} BPM", 1f)
             return Track(uri, name, analysis, pcm, rate, channels)
         } catch (e: Exception) {
             dir.deleteRecursively()
