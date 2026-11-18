@@ -1,5 +1,14 @@
 # Changes
 
+## [1.4.1] - 2026-11-18
+
+### Fixed
+- Looks saved before 1.4 keep their original appearance. Looks now carry a `lookVersion` (2 = beat effects). A stored look without one (the current session, a saved look or an imported settings file from 1.3 or earlier) loads with **Rings on every beat**, **Punch in on the first beat of each bar** and **Color split on snares** off; a switch the look already has is kept. New looks, **Reset controls**, first launch and presets still get the effects on. This replaces the 1.4.0 "Compatibility" note below.
+- The **Minimal pulse** preset spells out its beat effects (rings and punch on, color split off) instead of relying on the defaults.
+
+### Changed
+- Includes 1.3.1 (tempo octave fix for straight 140 BPM songs).
+
 ## [1.4.0] - 2026-11-18
 
 ### Added

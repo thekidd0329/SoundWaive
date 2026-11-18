@@ -1,5 +1,10 @@
 # Verification
 
+## 1.4.1 saved-look compatibility — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it. `Settings` uses `android.graphics.Color` and `org.json`, which the JVM unit tests do not load, so the look upgrade has no unit test; check it on a phone.
+- Not yet checked: loading a look saved in 1.3 (effects off), a new look and each preset (effects on, Minimal pulse without color split), an imported 1.3 settings file, and the session restored after updating from 1.3.
+
 ## 1.4.0 beat effects — November 18, 2026
 
 - Per the owner's rule, nothing was compiled, tested or rendered on the build box. The code was checked by reading it against the existing sources and the Android/Kotlin API documentation only.
