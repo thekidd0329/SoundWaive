@@ -84,9 +84,11 @@ class MainActivity : Activity() {
         super.onCreate(state)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        // First launch has no stored session and starts a new look; a stored session is
+        // read as a look so one from before 1.4 keeps its appearance.
         settings =
             try {
-                Settings(JSONObject(prefs.getString("settings", "{}")!!))
+                prefs.getString("settings", null)?.let { Settings(JSONObject(it)) } ?: Settings()
             } catch (_: Exception) {
                 Settings()
             }
