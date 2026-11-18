@@ -1,5 +1,11 @@
 # Verification
 
+## 1.6.0 ripple on hits and rainbow edge — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.drawBitmapMesh` takes `(meshWidth + 1) * (meshHeight + 1)` vertex pairs and draws with the paint's alpha and color filter; it is supported on hardware canvases from API 18, below this app's minSdk 26).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `latestHitKeepsTheBiggerRipple`, `rippleIsADampedWaveBehindItsFront`, `centroidIsTheBalancePointOfTheBands`, `rainbowEdgeOnlyOnBrightSounds`; in `AnalysisFormatTest.legacyFileWithoutBeatGridStillLoads`, the onset arrays.
+- Not yet checked: everything on a phone, in particular how the ripple reads on real songs, preview and export frame time with all seven effects on, and that looks saved in 1.5 open with the ripple and rainbow edge off.
+
 ## 1.5.0 note color glow and hi-hat sparkles — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android/Kotlin API docs (`Bitmap.extractAlpha` masks are drawn in the paint's color; `Color.HSVToColor`).
