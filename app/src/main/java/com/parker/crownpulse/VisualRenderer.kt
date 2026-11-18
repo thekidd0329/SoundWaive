@@ -64,6 +64,11 @@ class VisualRenderer(context: Context) {
     private val hitInfo = floatArrayOf(-1f, 0f)
     private var rippleAmount = 0f
     private val meshVerts = FloatArray((MESH + 1) * (MESH + 1) * 2)
+    // Flash on drops: age (-1 = none) and strength of the latest drop this frame.
+    private var dropAge = -1f
+    private var dropPower = 0f
+    // Light rays on bass: one reusable path for all the beams.
+    private val rayPath = Path()
     // The vignette only changes when its strength or the frame height does, so keep it.
     private var vignetteShader: Shader? = null
     private var vignetteKey = Float.NaN
@@ -251,6 +256,41 @@ class VisualRenderer(context: Context) {
     }
 
     /**
+     * Light rays on bass: [BeatFx.RAYS] thin beams fan out from behind the symbol, slowly
+     * turning with the music's flow. They appear when the bass passes [BeatFx.RAY_THRESHOLD],
+     * get brighter and wider with it, and every other beam is narrower. One reused path, one
+     * draw call, no allocation.
+     */
+    private fun lightRays(
+        c: Canvas,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        bass: Float,
+        flow: Float,
+        amount: Float,
+        color: Int,
+    ) {
+        val alpha = BeatFx.rayAlpha(bass, amount)
+        if (alpha < .01f) return
+        val half = BeatFx.rayHalfAngle(bass)
+        val inner = size * .3f
+        val outer = 2400f
+        val turn = flow * .05f
+        rayPath.reset()
+        for (j in 0 until BeatFx.RAYS) {
+            val mid = turn + j * tau / BeatFx.RAYS
+            val w = if (j % 2 == 0) half else half * .55f
+            rayPath.moveTo(cx + cos(mid) * inner, cy + sin(mid) * inner)
+            rayPath.lineTo(cx + cos(mid - w) * outer, cy + sin(mid - w) * outer)
+            rayPath.lineTo(cx + cos(mid + w) * outer, cy + sin(mid + w) * outer)
+            rayPath.close()
+        }
+        ink(color, alpha, fill = true)
+        c.drawPath(rayPath, p)
+    }
+
+    /**
      * A soft glow behind the symbol whose color follows the notes: each note's place on the
      * circle of fifths sets the hue, so a key or chord change slowly turns the glow. Clear
      * chords give a deep color, busy passages a paler one, and the bass makes it brighter
@@ -403,6 +443,10 @@ class VisualRenderer(context: Context) {
         } else {
             hitInfo[0] = -1f
         }
+        val dropAmount = if (s.b("dropFlash")) s.f("dropFlashAmount") else 0f
+        val drop = if (dropAmount > 0f) BeatFx.lastAtOrBefore(a.dropTimes, t) else -1
+        dropAge = if (drop >= 0) t - a.dropTimes[drop] else -1f
+        dropPower = if (drop >= 0) a.dropStrengths[drop] else 0f
         // Punch in on the first beat of each bar: a short zoom around the symbol that settles
         // within half a second. The layers zoom; background, grain, vignette and text do not.
         val punchSave = c.save()
@@ -493,6 +537,8 @@ class VisualRenderer(context: Context) {
                 .16f + .25f * (1 - q),
             )
         }
+        if (s.b("lightRays") && s.f("lightRaysAmount") > 0f)
+            lightRays(c, cx, cy, size, bass, flow, s.f("lightRaysAmount"), secondary)
         if (s.b("noteGlow") && s.f("noteGlowAmount") > 0f)
             noteGlow(c, t, a, cx, cy, size, bass, s.f("noteGlowAmount"), primary)
         if (s.b("colorSplit")) {
@@ -518,6 +564,15 @@ class VisualRenderer(context: Context) {
         stamp(c, s, t, size, cx, cy, angle, s.f("opacity"), ripple = true)
         if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
             shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
+        if (dropAmount > 0f) {
+            // Drop wave: one wide ring that sweeps past the edges of the frame.
+            val fade = BeatFx.decay(dropAge, BeatFx.DROP_LIFE)
+            if (fade > .01f) {
+                val r = size * .5f + BeatFx.ringTravel(dropAge, BeatFx.DROP_LIFE) * 2000f
+                val alpha = (.8f * fade * dropAmount * dropPower).coerceIn(0f, 1f)
+                circle(c, cx, cy, r, white, 4f + 22f * fade, alpha)
+            }
+        }
         if (s.b("sparkles")) sparkles(c, t, s, cx, cy, size, hat, s.f("sparkleAmount"), tertiary)
         if (kick > .16f && s.i("rings") > 0) {
             val age = -.15f * ln(max(kick, .001f))
@@ -560,6 +615,12 @@ class VisualRenderer(context: Context) {
             }
         }
         c.restoreToCount(punchSave)
+        if (dropAmount > 0f) {
+            // Flash on drops: the whole frame lights up and fades within DROP_LIFE. Drawn a bit
+            // past the edges so screen shake never uncovers a strip.
+            val flash = BeatFx.dropFlash(dropAge, dropPower, dropAmount)
+            if (flash > .005f) rect(c, -100f, -100f, 1280f, h + 200f, white, flash)
+        }
         if (s.f("grain") > 0) {
             // Hashed positions instead of a new Random every frame; same result in preview
             // and export.

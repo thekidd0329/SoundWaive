@@ -876,6 +876,8 @@ class MainActivity : Activity() {
         toggle("Sparkles on hi-hats", "sparkles")
         toggle("Ripple on hits", "hitRipple")
         toggle("Rainbow edge on bright sounds", "brightFringe")
+        toggle("Flash on drops", "dropFlash")
+        toggle("Light rays on bass", "lightRays")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -890,6 +892,8 @@ class MainActivity : Activity() {
             slider("Sparkle amount", "sparkleAmount", 0f, 2f)
             slider("Ripple strength", "hitRippleAmount", 0f, 2f)
             slider("Rainbow edge strength", "brightFringeAmount", 0f, 2f)
+            slider("Drop flash strength", "dropFlashAmount", 0f, 2f)
+            slider("Light ray strength", "lightRaysAmount", 0f, 2f)
         }
         panel.addView(
             text(

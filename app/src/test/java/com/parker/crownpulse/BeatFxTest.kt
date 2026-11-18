@@ -198,4 +198,45 @@ class BeatFxTest {
         assertEquals(0f, BeatFx.fringeScale(1f, 1f, 0f), eps)
         assertEquals(0f, BeatFx.fringeScale(Float.NaN, 1f, 1f), eps)
     }
+
+    @Test
+    fun findsADropWhereTheMusicJumps() {
+        // 10 frames per second: 5 s at level .2, then 5 s at .9.
+        val level = FloatArray(100) { if (it < 50) .2f else .9f }
+        val drops = BeatFx.findDrops(level, 10f, FloatArray(0))
+        assertEquals(2, drops.size)
+        assertEquals(5f, drops[0], eps)
+        assertEquals(1f, drops[1], eps)
+        // A beat close by pulls the drop onto it; a far one does not.
+        assertEquals(4.95f, BeatFx.findDrops(level, 10f, floatArrayOf(4.95f))[0], eps)
+        assertEquals(5f, BeatFx.findDrops(level, 10f, floatArrayOf(4.5f))[0], eps)
+    }
+
+    @Test
+    fun noDropsInSteadyOrEmptyMusic() {
+        assertEquals(0, BeatFx.findDrops(FloatArray(300) { .8f }, 10f, FloatArray(0)).size)
+        assertEquals(0, BeatFx.findDrops(FloatArray(0), 10f, FloatArray(0)).size)
+        assertEquals(0, BeatFx.findDrops(FloatArray(100) { it / 99f }, 0f, FloatArray(0)).size)
+        // A jump that stays quiet is not a drop.
+        val soft = FloatArray(100) { if (it < 50) 0f else .4f }
+        assertEquals(0, BeatFx.findDrops(soft, 10f, FloatArray(0)).size)
+    }
+
+    @Test
+    fun dropFlashFadesOut() {
+        assertEquals(BeatFx.DROP_FLASH, BeatFx.dropFlash(0f, 1f, 1f), eps)
+        assertEquals(2 * BeatFx.DROP_FLASH, BeatFx.dropFlash(0f, 5f, 9f), eps)
+        assertEquals(0f, BeatFx.dropFlash(-1f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.dropFlash(BeatFx.DROP_LIFE, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.dropFlash(.1f, 1f, 0f), eps)
+    }
+
+    @Test
+    fun lightRaysFollowTheBass() {
+        assertEquals(0f, BeatFx.rayAlpha(BeatFx.RAY_THRESHOLD, 1f), eps)
+        assertEquals(BeatFx.RAY_ALPHA, BeatFx.rayAlpha(1f, 1f), eps)
+        assertEquals(2 * BeatFx.RAY_ALPHA, BeatFx.rayAlpha(1.8f, 9f), eps)
+        assertEquals(0f, BeatFx.rayAlpha(Float.NaN, 1f), eps)
+        assertTrue(BeatFx.rayHalfAngle(1f) > BeatFx.rayHalfAngle(0f))
+    }
 }
