@@ -73,6 +73,10 @@ class VisualRenderer(context: Context) {
     private var dropPower = 0f
     // Light rays on bass: one reusable path for all the beams.
     private val rayPath = Path()
+    // Sound blob: outline points and one reusable path for the smooth curve through them.
+    private val blobX = FloatArray(BeatFx.BLOB_POINTS)
+    private val blobY = FloatArray(BeatFx.BLOB_POINTS)
+    private val blobPath = Path()
     // The vignette only changes when its strength or the frame height does, so keep it.
     private var vignetteShader: Shader? = null
     private var vignetteKey = Float.NaN
@@ -397,6 +401,112 @@ class VisualRenderer(context: Context) {
     }
 
     /**
+     * Sound blob: a soft closed shape around the symbol whose outline is the spectrum, bass
+     * at the bottom and treble at the top, mirrored left and right, swelling with the bass.
+     * Each band is averaged with its level 60 ms earlier so the edge flows instead of
+     * flickering. Drawn as one quadratic curve through the midpoints of [BeatFx.BLOB_POINTS]
+     * points (a smooth closed spline), filled faintly, outlined, and outlined again a little
+     * smaller in the accent color. One reused path, no allocation.
+     */
+    private fun soundBlob(
+        c: Canvas,
+        t: Float,
+        a: Analysis,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        bass: Float,
+        amount: Float,
+        color: Int,
+        accent: Int,
+    ) {
+        val n = BeatFx.BLOB_POINTS
+        val base = size * .56f
+        val back = max(0f, t - .06f)
+        for (j in 0 until n) {
+            val band = 8 + BeatFx.blobBand(j, n, a.bands)
+            val v = .6f * a.value(t, band) + .4f * a.value(back, band)
+            val r = base * BeatFx.blobRadius(v, bass, amount)
+            // Point 0 at the bottom (angle a quarter turn, y grows downward).
+            val angle = j * tau / n + tau / 4
+            blobX[j] = cx + cos(angle) * r
+            blobY[j] = cy + sin(angle) * r * 1.1f
+        }
+        blobPath.reset()
+        blobPath.moveTo((blobX[n - 1] + blobX[0]) * .5f, (blobY[n - 1] + blobY[0]) * .5f)
+        for (j in 0 until n) {
+            val next = if (j + 1 == n) 0 else j + 1
+            blobPath.quadTo(
+                blobX[j],
+                blobY[j],
+                (blobX[j] + blobX[next]) * .5f,
+                (blobY[j] + blobY[next]) * .5f,
+            )
+        }
+        blobPath.close()
+        val lift = bass.coerceIn(0f, 1f)
+        val k = amount.coerceIn(0f, 2f)
+        ink(color, (.07f * k).coerceIn(0f, 1f), fill = true)
+        c.drawPath(blobPath, p)
+        ink(color, ((.3f + .3f * lift) * k).coerceIn(0f, 1f), 3f + 3f * lift)
+        c.drawPath(blobPath, p)
+        val save = c.save()
+        c.scale(.86f, .86f, cx, cy)
+        ink(accent, ((.15f + .2f * lift) * k).coerceIn(0f, 1f), 2f)
+        c.drawPath(blobPath, p)
+        c.restoreToCount(save)
+    }
+
+    /**
+     * Star warp: streaks fly out from behind the symbol toward the edges, faster in loud, busy
+     * parts and surging on kicks, like flying through stars. Every star's place is a function
+     * of the music flow (see [BeatFx.warpTravel]) and a hash, so preview and export match;
+     * each new trip gets a new direction. Stars speed up as they go (depth squared) and their
+     * tails grow with the energy. At most [BeatFx.WARP_STARS] lines, no allocation.
+     */
+    private fun starWarp(
+        c: Canvas,
+        s: Settings,
+        flow: Float,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        energy: Float,
+        amount: Float,
+        detail: Float,
+        accent: Int,
+    ) {
+        val count = (BeatFx.WARP_STARS * detail).toInt()
+        val seed = s.i("seed")
+        val start = size * .3f
+        val reach = 1500f
+        val tail = .06f + .08f * energy.coerceIn(0f, 1.5f)
+        for (j in 0 until count) {
+            val d = BeatFx.warpTravel(BeatFx.hash01(j * 7 + seed * 13 + 5), flow)
+            val trip = floor(d)
+            val z = d - trip
+            val alpha = BeatFx.warpAlpha(z, energy, amount)
+            if (alpha < .01f) continue
+            val angle = BeatFx.hash01(j * 7 + trip.toInt() * 101 + seed) * tau
+            val dx = cos(angle)
+            val dy = sin(angle)
+            val r = start + z * z * reach
+            val back = max(0f, z - tail)
+            val rt = start + back * back * reach
+            line(
+                c,
+                cx + dx * rt,
+                cy + dy * rt,
+                cx + dx * r,
+                cy + dy * r,
+                if (j % 4 == 0) accent else white,
+                1.2f + 2.2f * z,
+                alpha,
+            )
+        }
+    }
+
+    /**
      * Small four-point glints around the symbol on hi-hat hits. Places come from a hash of
      * the music time (a new set 15 times a second), so preview and export match; each set
      * fades a little before the next one replaces it.
@@ -544,6 +654,19 @@ class VisualRenderer(context: Context) {
         if (s.b("grid")) grid(c, flow, pal, energy)
         filaments(c, t, a, s, flow, energy, kick, md, pal, detail)
         rings(c, t, a, s, flow, cx, cy, energy, kick, md, pal, detail)
+        if (s.b("starWarp") && s.f("starWarpAmount") > 0f)
+            starWarp(
+                c,
+                s,
+                flow,
+                cx,
+                cy,
+                690 * s.f("scale"),
+                energy,
+                s.f("starWarpAmount"),
+                detail,
+                tertiary,
+            )
         val tunnel = s.i("trails").coerceIn(0, 18)
         for (j in 0 until tunnel) {
             val z = (j.toFloat() / tunnel + flow * .032f) % 1
@@ -628,6 +751,8 @@ class VisualRenderer(context: Context) {
             lightRays(c, cx, cy, size, bass, flow, s.f("lightRaysAmount"), secondary)
         if (s.b("noteGlow") && s.f("noteGlowAmount") > 0f)
             noteGlow(c, t, a, cx, cy, size, bass, s.f("noteGlowAmount"), primary)
+        if (s.b("soundBlob") && s.f("soundBlobAmount") > 0f)
+            soundBlob(c, t, a, cx, cy, size, bass, s.f("soundBlobAmount"), secondary, tertiary)
         val bounceSave = c.save()
         if (s.b("beatBounce")) {
             // Bounce on beats: the symbol squashes on each beat, rebounds and settles, and

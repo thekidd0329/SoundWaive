@@ -1,5 +1,22 @@
 # Changes
 
+## [1.10.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Shape that moves with the sound (sound blob):** a soft shape behind the symbol whose edge is the song's spectrum: bass at the bottom, treble at the top, the left and right halves mirrored, and the whole shape swells with the bass. Each of the 48 outline points follows one analysis band, averaged with its level 60 ms earlier so the edge flows instead of flickering, and the outline is one smooth closed curve through the midpoints (quadratic spline). It is filled faintly and outlined in the palette's second color, with a second, smaller outline in the third color. At the default strength one band at full level pushes the edge out 28 % and full bass swells it 12 %.
+  - **Star warp:** up to 48 streaks fly out from behind the symbol to the edges of the frame, like flying through stars. They move with the music's flow, so they speed up in loud, busy parts and surge on kicks; they speed up as they travel (depth squared), their tails get longer with the energy and every new trip takes a new direction. Most are white, every fourth uses the palette's third color. Battery saver draws half of them in the preview; export always draws all.
+  - Blob idea from the MIT-licensed ntrogh/spectrum-visualizer and Pahiro/avs (circular "blob" spectrum that pulses with the bass); music-pushed starfield from the MIT-licensed slastra/hyprglaze. No code copied.
+  - **More options** adds **Sound shape strength** and **Star warp strength** (0 turns them off).
+- `BeatFx`: `blobBand`, `blobRadius`, `warpTravel` and `warpAlpha`, with JVM tests.
+
+### Changed
+- Stored looks are now `lookVersion` 8. A look stored before 1.10 loads with the two new switches off, so it looks the same as before; the rules for older looks are unchanged.
+- **Ink storm** keeps both new effects. **Minimal pulse** turns both off.
+
+### Performance
+- The blob is 96 band lookups, one reused `Path` and three path draws per frame. The warp is at most 48 lines. No per-frame allocation.
+
 ## [1.9.0] - 2026-11-18
 
 ### Added
