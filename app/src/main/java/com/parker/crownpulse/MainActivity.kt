@@ -882,6 +882,8 @@ class MainActivity : Activity() {
         toggle("Tilt on beats", "beatTilt")
         toggle("Bounce on beats", "beatBounce")
         toggle("Dots that orbit on the beat", "beatOrbit")
+        toggle("Shape that moves with the sound", "soundBlob")
+        toggle("Star warp", "starWarp")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -902,6 +904,8 @@ class MainActivity : Activity() {
             slider("Tilt strength", "beatTiltAmount", 0f, 2f)
             slider("Bounce strength", "beatBounceAmount", 0f, 2f)
             slider("Orbit dot size", "beatOrbitAmount", 0f, 2f)
+            slider("Sound shape strength", "soundBlobAmount", 0f, 2f)
+            slider("Star warp strength", "starWarpAmount", 0f, 2f)
         }
         panel.addView(
             text(

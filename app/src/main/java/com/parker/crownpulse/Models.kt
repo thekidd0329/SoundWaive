@@ -162,8 +162,9 @@ class Settings(var json: JSONObject = newLook()) {
         // presets are written with the current version, so for them a missing switch still
         // falls back to DEFAULTS (on).
         // The same rule for the 1.5 glow effects, the 1.6 ripple and rainbow edge, the 1.7
-        // drop flash and light rays, the 1.8 build-up and beat tilt and the 1.9 bounce and
-        // orbit dots: looks stored before them keep them off.
+        // drop flash and light rays, the 1.8 build-up and beat tilt, the 1.9 bounce and
+        // orbit dots and the 1.10 sound blob and star warp: looks stored before them keep
+        // them off.
         val stored = json.optInt(LOOK_VERSION_KEY, 1)
         if (stored < BEAT_EFFECTS_VERSION)
             for (k in BEAT_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
@@ -177,6 +178,8 @@ class Settings(var json: JSONObject = newLook()) {
             for (k in BUILD_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < BOUNCE_EFFECTS_VERSION)
             for (k in BOUNCE_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+        if (stored < WARP_EFFECTS_VERSION)
+            for (k in WARP_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < LOOK_VERSION) json.put(LOOK_VERSION_KEY, LOOK_VERSION)
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
@@ -240,6 +243,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "beatTiltAmount" to (0.0..2.0),
                 "beatBounceAmount" to (0.0..2.0),
                 "beatOrbitAmount" to (0.0..2.0),
+                "soundBlobAmount" to (0.0..2.0),
+                "starWarpAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -352,8 +357,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("background", "#171717")
                 // Black and white look: no colored glow or rainbow edge; sparkles, the
                 // ripple, the drop flash, the light rays, the build-up, the beat tilt, the
-                // bounce and the orbit dots stay (they use the look's own black and white
-                // colors or no color at all).
+                // bounce, the orbit dots, the sound blob and the star warp stay (they use the
+                // look's own black and white colors or no color at all).
                 set("noteGlow", false)
                 set("sparkles", true)
                 set("hitRipple", true)
@@ -364,6 +369,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("beatTilt", true)
                 set("beatBounce", true)
                 set("beatOrbit", true)
+                set("soundBlob", true)
+                set("starWarp", true)
             }
             "Cosmic bloom" -> {
                 set("palette", "Aurora")
@@ -415,6 +422,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("beatTilt", false)
                 set("beatBounce", false)
                 set("beatOrbit", false)
+                set("soundBlob", false)
+                set("starWarp", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -474,7 +483,7 @@ class Settings(var json: JSONObject = newLook()) {
          * Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. 3: 1.5 note
          * color glow and hi-hat sparkles. 4: 1.6 ripple on hits and rainbow edge. 5: 1.7
          * flash on drops and light rays on bass. 6: 1.8 build-up before drops and tilt on
-         * beats. 7: 1.9 bounce on beats and orbit dots.
+         * beats. 7: 1.9 bounce on beats and orbit dots. 8: 1.10 sound blob and star warp.
          */
         const val LOOK_VERSION_KEY = "lookVersion"
         const val BEAT_EFFECTS_VERSION = 2
@@ -483,13 +492,15 @@ class Settings(var json: JSONObject = newLook()) {
         const val DROP_EFFECTS_VERSION = 5
         const val BUILD_EFFECTS_VERSION = 6
         const val BOUNCE_EFFECTS_VERSION = 7
-        const val LOOK_VERSION = 7
+        const val WARP_EFFECTS_VERSION = 8
+        const val LOOK_VERSION = 8
         val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
         val GLOW_EFFECT_SWITCHES = listOf("noteGlow", "sparkles")
         val RIPPLE_EFFECT_SWITCHES = listOf("hitRipple", "brightFringe")
         val DROP_EFFECT_SWITCHES = listOf("dropFlash", "lightRays")
         val BUILD_EFFECT_SWITCHES = listOf("buildUp", "beatTilt")
         val BOUNCE_EFFECT_SWITCHES = listOf("beatBounce", "beatOrbit")
+        val WARP_EFFECT_SWITCHES = listOf("soundBlob", "starWarp")
 
         /** Empty JSON for a brand-new look, stamped with the current format version. */
         fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
@@ -643,6 +654,12 @@ class Settings(var json: JSONObject = newLook()) {
                 "beatBounceAmount" to 1.0,
                 "beatOrbit" to true,
                 "beatOrbitAmount" to 1.0,
+                // 1.10 sound blob and star warp: on for new looks and presets, off for looks
+                // stored before.
+                "soundBlob" to true,
+                "soundBlobAmount" to 1.0,
+                "starWarp" to true,
+                "starWarpAmount" to 1.0,
             )
     }
 }

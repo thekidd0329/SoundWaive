@@ -16,8 +16,8 @@ import kotlin.math.sqrt
  * Pure timing and easing rules for the beat effects (shockwave rings, the punch-in on the
  * first beat of each bar, the snare color split, the note color glow, the hi-hat
  * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops,
- * the light rays on bass, the build-up before drops, the tilt on beats, the bounce on beats
- * and the orbit dots). Everything is a function of music time,
+ * the light rays on bass, the build-up before drops, the tilt on beats, the bounce on beats,
+ * the orbit dots, the sound blob and the star warp). Everything is a function of music time,
  * so the preview and the export draw identical frames. No Android types and no allocation,
  * so the rules are covered by JVM tests and are safe to call every frame.
  */
@@ -157,6 +157,24 @@ object BeatFx {
 
     /** How long the orbit dots stay swollen after a beat, in seconds. */
     const val ORBIT_PULSE_LIFE = .35f
+
+    /** Points around the sound blob's outline (it is drawn as a smooth curve through them). */
+    const val BLOB_POINTS = 48
+
+    /** How far one band at full level pushes the blob out at amount 1, in base radii. */
+    const val BLOB_BAND = .28f
+
+    /** How far full bass swells the whole blob at amount 1, in base radii. */
+    const val BLOB_BASS = .12f
+
+    /** Stars in the star warp at full detail. */
+    const val WARP_STARS = 48
+
+    /** Trips from the center to the edge per unit of music flow (see [Analysis.flow]). */
+    const val WARP_RATE = .35f
+
+    /** Fraction of a trip over which a new star fades in. */
+    const val WARP_FADE_IN = .15f
 
     /** Index of the last entry of sorted [times] at or before [t], or -1 when none is. */
     fun lastAtOrBefore(times: FloatArray, t: Float): Int {
@@ -563,4 +581,47 @@ object BeatFx {
     fun orbitPulse(age: Float, strength: Float, downbeat: Boolean): Float =
         decay(age, ORBIT_PULSE_LIFE) * (.5f + .5f * strength.coerceIn(0f, 1f)) *
             (if (downbeat) 1.5f else 1f)
+
+    /**
+     * Spectrum band (0 until [bands]) shown at outline point [point] of [points]. Point 0 is
+     * the bottom of the blob and the bands climb both sides to the top, so the left and right
+     * halves mirror each other: bass at the bottom, treble at the top. Circular "blob" spectrum
+     * idea from the MIT-licensed ntrogh/spectrum-visualizer and Pahiro/avs; no code copied.
+     */
+    fun blobBand(point: Int, points: Int, bands: Int): Int {
+        if (points <= 0 || bands <= 0) return 0
+        val u = ((point % points) + points) % points / points.toFloat()
+        val m = 1f - abs(2f * u - 1f)
+        return (m * (bands - 1)).roundToInt().coerceIn(0, bands - 1)
+    }
+
+    /**
+     * Radius of the sound blob, in base radii, where the band under it is at [band] (0..1)
+     * with [bass] (0..1.8) at [amount] (0..2). 1 = resting circle.
+     */
+    fun blobRadius(band: Float, bass: Float, amount: Float): Float {
+        val k = amount.coerceIn(0f, 2f)
+        return 1f + k * (BLOB_BAND * band.coerceIn(0f, 1.5f) + BLOB_BASS * bass.coerceIn(0f, 1.8f))
+    }
+
+    /**
+     * How far (0 until 1) a star whose start is [offset] (0..1) has traveled from the center
+     * at music flow [flow], plus the trip it is on (a new trip gets a new direction). Written
+     * as trip + depth into one number: the trip is its whole part, the depth its fraction.
+     * The flow grows faster in loud, busy parts and jumps on kicks, so the stars surge with
+     * the music. Music-pushed starfield idea from the MIT-licensed slastra/hyprglaze; no code
+     * copied.
+     */
+    fun warpTravel(offset: Float, flow: Float): Float {
+        val d = offset + flow * WARP_RATE
+        return if (d.isFinite()) d else 0f
+    }
+
+    /** Opacity of a star at depth [z] (0..1) with [energy] (0..1.5) at [amount] (0..2). */
+    fun warpAlpha(z: Float, energy: Float, amount: Float): Float {
+        if (!(z >= 0f) || z >= 1f) return 0f
+        val fadeIn = (z / WARP_FADE_IN).coerceIn(0f, 1f)
+        return (fadeIn * (.25f + .45f * energy.coerceIn(0f, 1.5f)) * amount.coerceIn(0f, 2f))
+            .coerceIn(0f, 1f)
+    }
 }

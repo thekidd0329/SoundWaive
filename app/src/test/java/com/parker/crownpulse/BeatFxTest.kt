@@ -321,5 +321,41 @@ class BeatFxTest {
         assertEquals(1.5f, BeatFx.orbitPulse(0f, 1f, true), eps)
         assertEquals(0f, BeatFx.orbitPulse(BeatFx.ORBIT_PULSE_LIFE, 1f, true), eps)
     }
-}
 
+    @Test
+    fun blobBandsMirrorWithBassAtTheBottom() {
+        val n = BeatFx.BLOB_POINTS
+        assertEquals(0, BeatFx.blobBand(0, n, 80))
+        assertEquals(79, BeatFx.blobBand(n / 2, n, 80))
+        // Left and right halves show the same bands.
+        for (j in 1 until n) assertEquals(BeatFx.blobBand(j, n, 80), BeatFx.blobBand(n - j, n, 80))
+        // Wraps around and survives empty input.
+        assertEquals(BeatFx.blobBand(3, n, 80), BeatFx.blobBand(n + 3, n, 80))
+        assertEquals(0, BeatFx.blobBand(5, 0, 80))
+        assertEquals(0, BeatFx.blobBand(5, n, 0))
+    }
+
+    @Test
+    fun blobRestsAsACircleAndSwellsWithTheSound() {
+        assertEquals(1f, BeatFx.blobRadius(0f, 0f, 1f), eps)
+        assertEquals(1f, BeatFx.blobRadius(1f, 1f, 0f), eps)
+        assertEquals(1f + BeatFx.BLOB_BAND + BeatFx.BLOB_BASS, BeatFx.blobRadius(1f, 1f, 1f), eps)
+        assertTrue(BeatFx.blobRadius(.5f, 0f, 1f) < BeatFx.blobRadius(.8f, 0f, 1f))
+    }
+
+    @Test
+    fun warpStarsTravelWithTheFlowAndFadeIn() {
+        // Depth grows with the flow and wraps into the next trip.
+        assertEquals(.25f, BeatFx.warpTravel(.25f, 0f), eps)
+        assertEquals(.25f + BeatFx.WARP_RATE, BeatFx.warpTravel(.25f, 1f), eps)
+        assertEquals(0f, BeatFx.warpTravel(.25f, Float.NaN), eps)
+        // Invisible at the very start of a trip and outside 0..1, fading in, then steady.
+        assertEquals(0f, BeatFx.warpAlpha(0f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.warpAlpha(1f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.warpAlpha(Float.NaN, 1f, 1f), eps)
+        val early = BeatFx.warpAlpha(BeatFx.WARP_FADE_IN / 2, 1f, 1f)
+        assertTrue(early > 0f && early < BeatFx.warpAlpha(.5f, 1f, 1f))
+        assertEquals(.7f, BeatFx.warpAlpha(.5f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.warpAlpha(.5f, 1f, 0f), eps)
+    }
+}
