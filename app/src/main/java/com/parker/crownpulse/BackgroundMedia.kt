@@ -103,8 +103,11 @@ class GifBackground(
  * SurfaceTexture; a GLES pass scales (and rotates, from the track's rotation) each frame into
  * a working-size pbuffer, read back into a reused bitmap. The video's audio track is never
  * selected. All codec and GL work runs on one private thread with its own EGL context, so it
- * cannot disturb the export encoder's context. Later, a GPU export can sample the same
- * external texture directly and skip the read-back.
+ * cannot disturb the export encoder's context.
+ *
+ * A GPU export calls [useTexture] instead: the decoder then writes each frame straight into
+ * the export's own external texture (zero copy: no read-back, no bitmap, no upload) and
+ * [takeTextureFrame] says when a new one is waiting there. [useBitmaps] switches back.
  *
  * [frame] blocks until the exact frame is ready (export). [latest] returns the newest frame
  * at once and decodes towards the requested time in the background (preview).
@@ -150,6 +153,12 @@ private constructor(
     private var heldPts = NONE
     private var shownPts = NONE
     private var seeked = false
+
+    // Zero-copy export output (see useTexture); null while frames go to bitmaps.
+    private var external: SurfaceTexture? = null
+    private var externalSurface: Surface? = null
+    private val externalFresh = AtomicBoolean(false)
+    private var needSeek = false
 
     // Preview requests: newest wanted time, and whether a decode task is queued.
     @Volatile private var wantedUs = 0L
@@ -331,8 +340,13 @@ private constructor(
             if (outputDone && heldIndex < 0) return
         }
         val far = shownPts == NONE && targetUs > SEEK_AHEAD_US
-        if ((shownPts != NONE && (targetUs < shownPts || targetUs - shownPts > SEEK_AHEAD_US)) || far)
+        if (
+            needSeek ||
+                (shownPts != NONE && (targetUs < shownPts || targetUs - shownPts > SEEK_AHEAD_US)) ||
+                far
+        )
             seek(targetUs)
+        needSeek = false
         var candidate = -1
         var candidatePts = NONE
         var lastProgress = System.nanoTime()
@@ -387,6 +401,12 @@ private constructor(
                 if (left <= 0) throw IOException("The background video frame did not arrive.")
                 frameLock.wait(left)
             }
+        }
+        if (external != null) {
+            // Zero copy: the frame now waits in the export's texture; it latches it itself.
+            externalFresh.set(true)
+            shownPts = pts
+            return
         }
         texture.updateTexImage()
         texture.getTransformMatrix(matrix)
@@ -450,6 +470,71 @@ private constructor(
         return if (shownPts == NONE) null else synchronized(this) { front }
     }
 
+    /**
+     * Zero-copy export: from now on decoded frames go straight into [target], an external
+     * GL texture owned by the export (its thread calls updateTexImage after
+     * [takeTextureFrame] returns true), and [frame] only decodes. Uses
+     * MediaCodec.setOutputSurface, so the decoder keeps running. Returns false, and keeps
+     * the bitmap path, if this decoder can't switch.
+     */
+    fun useTexture(target: SurfaceTexture): Boolean =
+        try {
+            onThread {
+                val out = Surface(target)
+                try {
+                    target.setOnFrameAvailableListener(
+                        {
+                            synchronized(frameLock) {
+                                frameReady = true
+                                frameLock.notifyAll()
+                            }
+                        },
+                        Handler(callbacks.looper),
+                    )
+                    decoder.setOutputSurface(out)
+                } catch (e: Exception) {
+                    out.release()
+                    throw e
+                }
+                externalSurface = out
+                external = target
+                externalFresh.set(false)
+                // Show the right frame again on the new surface.
+                shownPts = NONE
+                needSeek = true
+            }
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("SoundWaive", "Zero-copy video background unavailable", e)
+            false
+        }
+
+    /** True once per frame that [useTexture]'s target has received since the last call. */
+    fun takeTextureFrame(): Boolean = externalFresh.getAndSet(false)
+
+    /** Ends [useTexture]: frames go to bitmaps again (safe to call more than once). */
+    fun useBitmaps() {
+        if (released.get()) return
+        try {
+            onThread {
+                val target = external ?: return@onThread
+                try {
+                    decoder.setOutputSurface(surface)
+                } finally {
+                    target.setOnFrameAvailableListener(null)
+                    externalSurface?.release()
+                    externalSurface = null
+                    external = null
+                    externalFresh.set(false)
+                    shownPts = NONE
+                    needSeek = true
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SoundWaive", "Could not switch the background video back", e)
+        }
+    }
+
     override fun release() {
         if (!released.compareAndSet(false, true)) return
         try {
@@ -459,6 +544,8 @@ private constructor(
                 } catch (_: Exception) {}
                 decoder.release()
                 extractor.release()
+                external?.setOnFrameAvailableListener(null)
+                externalSurface?.release()
                 surface.release()
                 texture.release()
                 GLES20.glDeleteTextures(1, intArrayOf(oesTexture), 0)
