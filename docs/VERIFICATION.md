@@ -1,5 +1,16 @@
 # Verification
 
+## 1.3.1 tempo octave review fix — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it.
+- New Rust tests to run (`cd engine && cargo test`): `straight_quarters_at_70_are_doubled_to_140`, `straight_quarter_140_reads_140` (12 s and 30 s), `syncopated_76_is_not_doubled`. The existing trap and ballad tests are unchanged.
+
+## 1.3.0 tempo octave and GPU export — November 18, 2026
+
+- Per the owner's rule for this release, nothing was compiled, tested or rendered on the build box. The code was checked by reading it against the existing sources and the Android/Rust API documentation only.
+- New Rust tests for the owner to run (`cd engine && cargo test`): `half_time_trap_reads_140_not_70` (12 s and 30 s), `slow_ballad_is_not_doubled` (76 BPM), `short_clip_tempo_is_precise` (12 s at 140, tempo and fitted grid within 0.3 BPM), `interpolation_passes_through_samples`.
+- Not yet checked: everything on a phone, in particular GPU export speed versus 1.2.0, the CPU fallback, rotated (landscape-only) encoders, and tempo on real trap, ballad and drum-and-bass tracks.
+
 ## 1.2.0 media backgrounds — November 17, 2026
 
 - One checkpoint run of `./gradlew --no-daemon check :app:assembleDebug` on the build box passed: 19 JVM tests (8 new in `BackgroundMathTest`: loop/hold mapping, invalid times, frame lookup, Render quality working sizes, even/never-upscaled sizes, Fill/Fit/zoom placement, reactivity limits). Lint reported 9 warnings, all from code that was already there (target/compile SDK versions, allowBackup, UsableSpace, four SetTextI18n); none came from the new code. The debug APK is 5.65 MB.

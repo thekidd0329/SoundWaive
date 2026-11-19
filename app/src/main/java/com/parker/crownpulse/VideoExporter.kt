@@ -2,8 +2,12 @@ package com.parker.crownpulse
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.SurfaceTexture
 import android.media.*
 import android.opengl.*
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Log
 import android.view.Surface
 import java.io.*
 import java.nio.*
@@ -141,24 +145,51 @@ class VideoExporter {
                 }
             }
             // Render at the chosen working size; the encoder pass upscales it to w x h with
-            // bilinear texture filtering on the GPU (and uploads a smaller texture).
+            // bilinear texture filtering on the GPU. Frames are drawn with a hardware Canvas
+            // into a GPU buffer the encoder pass samples directly (no CPU pixels, no upload).
+            // Drawing straight onto the encoder surface would lose the per-frame timestamps,
+            // so the existing EGL pass still presents each frame at its exact music time.
+            // If the GPU path is unavailable or fails, the CPU bitmap path takes over.
             val work = BackgroundMath.renderSize(w, h, s.s("renderQuality"))
-            bitmap = Bitmap.createBitmap(work.width, work.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
+            var gpu: Surface? = egl.openCanvas(work.width, work.height)
+            var canvas: Canvas? = null
             val total = ceil((end - start) * fps).toInt()
             var lastUpdate = 0L
             for (f in 0 until total) {
                 if (cancel.get()) throw InterruptedException("Export canceled")
-                renderer.draw(
-                    canvas,
-                    work.width,
-                    work.height,
-                    start + f / fps.toFloat(),
-                    track.analysis,
-                    s,
-                    true,
-                )
-                egl.draw(bitmap, f * 1_000_000_000L / fps)
+                val time = start + f / fps.toFloat()
+                val nanos = f * 1_000_000_000L / fps
+                var drawn = false
+                val target = gpu
+                if (target != null) {
+                    try {
+                        val c = target.lockHardwareCanvas()
+                        try {
+                            renderer.draw(c, work.width, work.height, time, track.analysis, s, true)
+                        } finally {
+                            target.unlockCanvasAndPost(c)
+                        }
+                        egl.drawCanvas(nanos)
+                        drawn = true
+                    } catch (e: InterruptedException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "GPU export path failed; continuing on the CPU path", e)
+                        egl.closeCanvas()
+                        gpu = null
+                    }
+                }
+                if (!drawn) {
+                    val image =
+                        bitmap
+                            ?: Bitmap.createBitmap(work.width, work.height, Bitmap.Config.ARGB_8888)
+                                .also {
+                                    bitmap = it
+                                    canvas = Canvas(it)
+                                }
+                    renderer.draw(canvas!!, work.width, work.height, time, track.analysis, s, true)
+                    egl.draw(image, nanos)
+                }
                 drain(false)
                 if (System.currentTimeMillis() - lastUpdate > 200) {
                     progress("Rendering frame ${f+1} of $total", .1f + .85f * (f + 1) / total)
@@ -348,7 +379,12 @@ class VideoExporter {
         }
     }
 
-    private class EncoderSurface(val surface: Surface, val w: Int, val h: Int, rotated: Boolean) {
+    private class EncoderSurface(
+        val surface: Surface,
+        val w: Int,
+        val h: Int,
+        private val rotated: Boolean,
+    ) {
         private val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         private val context: android.opengl.EGLContext
         private val eglSurface: android.opengl.EGLSurface
@@ -357,6 +393,29 @@ class VideoExporter {
         private val vertices: FloatBuffer
         private val coords: FloatBuffer
         private var initialized = false
+        private val position: Int
+        private val texCoord: Int
+        private val sampler: Int
+
+        // GPU canvas path: a SurfaceTexture whose hardware-Canvas frames are sampled here.
+        private var callbacks: HandlerThread? = null
+        private var canvasTexture: SurfaceTexture? = null
+        private var canvasSurface: Surface? = null
+        private var oesProgram = 0
+        private var oesTexture = 0
+        private var oesPosition = -1
+        private var oesTexCoord = -1
+        private var oesMatrix = -1
+        private var oesSampler = -1
+        private val oesCoords =
+            floats(
+                // Standard GL texture coordinates; the SurfaceTexture matrix flips them.
+                if (rotated) floatArrayOf(0f, 1f, 0f, 0f, 1f, 1f, 1f, 0f)
+                else floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
+            )
+        private val transform = FloatArray(16)
+        private val frameLock = Object()
+        private var frameReady = false
 
         init {
             val versions = IntArray(2)
@@ -407,34 +466,14 @@ class VideoExporter {
                 )
             check(context != EGL14.EGL_NO_CONTEXT && eglSurface != EGL14.EGL_NO_SURFACE)
             check(EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context))
-            fun shader(type: Int, text: String): Int {
-                val id = GLES20.glCreateShader(type)
-                GLES20.glShaderSource(id, text)
-                GLES20.glCompileShader(id)
-                val status = IntArray(1)
-                GLES20.glGetShaderiv(id, GLES20.GL_COMPILE_STATUS, status, 0)
-                check(status[0] != 0) { GLES20.glGetShaderInfoLog(id) }
-                return id
-            }
-            val vs =
-                shader(
-                    GLES20.GL_VERTEX_SHADER,
+            program =
+                link(
                     "attribute vec2 aPosition; attribute vec2 aTex; varying vec2 vTex; void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTex=aTex; }",
-                )
-            val fs =
-                shader(
-                    GLES20.GL_FRAGMENT_SHADER,
                     "precision mediump float; uniform sampler2D uTexture; varying vec2 vTex; void main(){ gl_FragColor=texture2D(uTexture,vTex); }",
                 )
-            program = GLES20.glCreateProgram()
-            GLES20.glAttachShader(program, vs)
-            GLES20.glAttachShader(program, fs)
-            GLES20.glLinkProgram(program)
-            val linked = IntArray(1)
-            GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linked, 0)
-            check(linked[0] != 0) { GLES20.glGetProgramInfoLog(program) }
-            GLES20.glDeleteShader(vs)
-            GLES20.glDeleteShader(fs)
+            position = GLES20.glGetAttribLocation(program, "aPosition")
+            texCoord = GLES20.glGetAttribLocation(program, "aTex")
+            sampler = GLES20.glGetUniformLocation(program, "uTexture")
             val ids = IntArray(1)
             GLES20.glGenTextures(1, ids, 0)
             texture = ids[0]
@@ -459,17 +498,9 @@ class VideoExporter {
                 GLES20.GL_TEXTURE_WRAP_T,
                 GLES20.GL_CLAMP_TO_EDGE,
             )
-            fun fb(a: FloatArray) =
-                ByteBuffer.allocateDirect(a.size * 4)
-                    .order(ByteOrder.nativeOrder())
-                    .asFloatBuffer()
-                    .apply {
-                        put(a)
-                        position(0)
-                    }
-            vertices = fb(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
+            vertices = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
             coords =
-                fb(
+                floats(
                     if (rotated) floatArrayOf(0f, 0f, 0f, 1f, 1f, 0f, 1f, 1f)
                     else floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
                 )
@@ -484,20 +515,111 @@ class VideoExporter {
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
                 initialized = true
             } else GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
-            val pos = GLES20.glGetAttribLocation(program, "aPosition")
-            val tex = GLES20.glGetAttribLocation(program, "aTex")
-            GLES20.glEnableVertexAttribArray(pos)
-            GLES20.glEnableVertexAttribArray(tex)
-            GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 0, vertices)
-            GLES20.glVertexAttribPointer(tex, 2, GLES20.GL_FLOAT, false, 0, coords)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uTexture"), 0)
+            GLES20.glEnableVertexAttribArray(position)
+            GLES20.glEnableVertexAttribArray(texCoord)
+            GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 0, vertices)
+            GLES20.glVertexAttribPointer(texCoord, 2, GLES20.GL_FLOAT, false, 0, coords)
+            GLES20.glUniform1i(sampler, 0)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "Video rendering failed" }
+            present(nanos)
+        }
+
+        private fun present(nanos: Long) {
             EGLExt.eglPresentationTimeANDROID(display, eglSurface, nanos)
             check(EGL14.eglSwapBuffers(display, eglSurface)) { "Video encoder surface failed" }
         }
 
+        /**
+         * Opens a [width] x [height] Surface for [Surface.lockHardwareCanvas] frames that
+         * [drawCanvas] sends to the encoder. Returns null when the GPU path is unavailable.
+         * Call on the export thread (this EGL context is current there).
+         */
+        fun openCanvas(width: Int, height: Int): Surface? =
+            try {
+                oesProgram = link(OES_VERTEX, OES_FRAGMENT)
+                oesPosition = GLES20.glGetAttribLocation(oesProgram, "aPosition")
+                oesTexCoord = GLES20.glGetAttribLocation(oesProgram, "aTex")
+                oesMatrix = GLES20.glGetUniformLocation(oesProgram, "uST")
+                oesSampler = GLES20.glGetUniformLocation(oesProgram, "uTex")
+                val ids = IntArray(1)
+                GLES20.glGenTextures(1, ids, 0)
+                oesTexture = ids[0]
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTexture)
+                for ((k, v) in
+                    listOf(
+                        GLES20.GL_TEXTURE_MIN_FILTER to GLES20.GL_LINEAR,
+                        GLES20.GL_TEXTURE_MAG_FILTER to GLES20.GL_LINEAR,
+                        GLES20.GL_TEXTURE_WRAP_S to GLES20.GL_CLAMP_TO_EDGE,
+                        GLES20.GL_TEXTURE_WRAP_T to GLES20.GL_CLAMP_TO_EDGE,
+                    )) GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, k, v)
+                check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "GPU canvas setup failed" }
+                val thread = HandlerThread("soundwaive-export-frames").apply { start() }
+                callbacks = thread
+                val st = SurfaceTexture(oesTexture)
+                canvasTexture = st
+                st.setDefaultBufferSize(width, height)
+                st.setOnFrameAvailableListener(
+                    {
+                        synchronized(frameLock) {
+                            frameReady = true
+                            frameLock.notifyAll()
+                        }
+                    },
+                    Handler(thread.looper),
+                )
+                Surface(st).also { canvasSurface = it }
+            } catch (e: Exception) {
+                Log.w(TAG, "GPU canvas unavailable; using the CPU path", e)
+                closeCanvas()
+                null
+            }
+
+        /** Waits for the frame just posted to the canvas Surface and encodes it at [nanos]. */
+        fun drawCanvas(nanos: Long) {
+            val st = checkNotNull(canvasTexture) { "GPU canvas is closed" }
+            synchronized(frameLock) {
+                val deadline = System.nanoTime() + FRAME_TIMEOUT_NS
+                while (!frameReady) {
+                    val left = (deadline - System.nanoTime()) / 1_000_000
+                    if (left <= 0) throw IOException("The GPU frame did not arrive.")
+                    frameLock.wait(left)
+                }
+                frameReady = false
+            }
+            st.updateTexImage()
+            st.getTransformMatrix(transform)
+            GLES20.glViewport(0, 0, w, h)
+            GLES20.glUseProgram(oesProgram)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTexture)
+            GLES20.glEnableVertexAttribArray(oesPosition)
+            GLES20.glEnableVertexAttribArray(oesTexCoord)
+            GLES20.glVertexAttribPointer(oesPosition, 2, GLES20.GL_FLOAT, false, 0, vertices)
+            GLES20.glVertexAttribPointer(oesTexCoord, 2, GLES20.GL_FLOAT, false, 0, oesCoords)
+            GLES20.glUniformMatrix4fv(oesMatrix, 1, false, transform, 0)
+            GLES20.glUniform1i(oesSampler, 0)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "GPU video rendering failed" }
+            present(nanos)
+        }
+
+        /** Releases the GPU canvas path (safe to call more than once). */
+        fun closeCanvas() {
+            canvasSurface?.release()
+            canvasSurface = null
+            canvasTexture?.release()
+            canvasTexture = null
+            callbacks?.quitSafely()
+            callbacks = null
+            if (oesTexture != 0) GLES20.glDeleteTextures(1, intArrayOf(oesTexture), 0)
+            oesTexture = 0
+            if (oesProgram != 0) GLES20.glDeleteProgram(oesProgram)
+            oesProgram = 0
+        }
+
         fun release() {
+            closeCanvas()
             GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
             GLES20.glDeleteProgram(program)
             EGL14.eglMakeCurrent(
@@ -511,5 +633,54 @@ class VideoExporter {
             EGL14.eglReleaseThread()
             EGL14.eglTerminate(display)
         }
+
+        companion object {
+            private const val FRAME_TIMEOUT_NS = 3_000_000_000L
+            private const val OES_VERTEX =
+                "uniform mat4 uST; attribute vec4 aPosition; attribute vec4 aTex; varying vec2 vTex;" +
+                    " void main(){ gl_Position=aPosition; vTex=(uST*aTex).xy; }"
+            private const val OES_FRAGMENT =
+                "#extension GL_OES_EGL_image_external : require\n" +
+                    "precision mediump float; uniform samplerExternalOES uTex; varying vec2 vTex;" +
+                    " void main(){ gl_FragColor=vec4(texture2D(uTex,vTex).rgb,1.0); }"
+
+            fun floats(a: FloatArray): FloatBuffer =
+                ByteBuffer.allocateDirect(a.size * 4)
+                    .order(ByteOrder.nativeOrder())
+                    .asFloatBuffer()
+                    .apply {
+                        put(a)
+                        position(0)
+                    }
+
+            private fun shader(type: Int, text: String): Int {
+                val id = GLES20.glCreateShader(type)
+                GLES20.glShaderSource(id, text)
+                GLES20.glCompileShader(id)
+                val status = IntArray(1)
+                GLES20.glGetShaderiv(id, GLES20.GL_COMPILE_STATUS, status, 0)
+                check(status[0] != 0) { GLES20.glGetShaderInfoLog(id) }
+                return id
+            }
+
+            fun link(vertex: String, fragment: String): Int {
+                val vs = shader(GLES20.GL_VERTEX_SHADER, vertex)
+                val fs = shader(GLES20.GL_FRAGMENT_SHADER, fragment)
+                val program = GLES20.glCreateProgram()
+                GLES20.glAttachShader(program, vs)
+                GLES20.glAttachShader(program, fs)
+                GLES20.glLinkProgram(program)
+                val linked = IntArray(1)
+                GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linked, 0)
+                GLES20.glDeleteShader(vs)
+                GLES20.glDeleteShader(fs)
+                check(linked[0] != 0) { GLES20.glGetProgramInfoLog(program) }
+                return program
+            }
+        }
+    }
+
+    private companion object {
+        const val TAG = "SoundWaive"
     }
 }
