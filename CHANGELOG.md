@@ -1,5 +1,24 @@
 # Changes
 
+## [1.6.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Ripple on hits:** strong kicks and snares send a wave rolling out through the crown (or your own artwork), like a pebble in water. The picture is drawn as a 17 x 17 point mesh (`Canvas.drawBitmapMesh`) whose points move along the radius by a damped wave `sin(k(r - front))`; the front leaves the center at 1.6 symbol heights per second and the whole ripple fades with a cubic decay over 0.55 s. Largest shift is 3 % of the symbol height at the default strength. A weak hit right after a big one does not cut the big ripple short. Shapes drawn as outlines (Ring, Star and so on) are not bent.
+  - **Rainbow edge on bright sounds:** cymbals, airy synths and other bright sounds push a red and a cyan copy out around the symbol (radial chromatic aberration). Brightness is the treble level weighted by the spectral centroid of the frame's 80 bands; dull or quiet passages stay clean. Works for every symbol.
+  - Ripple and treble/centroid ideas from the MIT-licensed baditaflorin/synaesthete; no code copied.
+  - **More options** adds **Ripple strength** and **Rainbow edge strength** (0 turns them off).
+- `BeatFx`: `latestHit`, `rippleShift`, `spectralCentroid` and `fringeScale`, with JVM tests.
+- `Analysis.onsetTimes`, `onsetStrengths`: hits sorted by time as primitive arrays.
+
+### Changed
+- Stored looks are now `lookVersion` 4. A look stored before 1.6 loads with the two new switches off, so it looks the same as before; the 1.4 and 1.5 rules for older looks are unchanged.
+- **Ink storm** keeps the ripple but turns the rainbow edge off (black and white look). **Minimal pulse** turns both off.
+- The snare color split copies ripple together with the symbol.
+
+### Performance
+- The ripple reuses one vertex array (289 points) and only replaces `drawBitmap` while a ripple is live; the rainbow edge is two extra bitmap draws on bright frames only, the same cost as the color split. No per-frame allocation.
+
 ## [1.5.0] - 2026-11-18
 
 ### Added

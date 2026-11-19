@@ -1,5 +1,20 @@
 # SoundWaive release notes
 
+## 1.6.0 — Ripples and rainbow edges
+
+**What's new**
+- **Ripple on hits.** Big kicks and snares send a wave rolling through the crown, like dropping a pebble in water. It settles in about half a second.
+- **Rainbow edge on bright sounds.** Cymbals, airy synths and other bright sounds give the crown a red and blue edge that grows with the sound. Darker, quieter parts stay clean.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make the ripple or the rainbow edge stronger or softer.
+
+**Good to know**
+- Looks you saved before 1.6 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- The ripple bends the crown and your own artwork. Simple outline shapes (Ring, Star and so on) get the rainbow edge but don't ripple.
+- Ink storm keeps the ripple but skips the rainbow edge; Minimal pulse skips both.
+
 ## 1.5.0 — Color glow and sparkles
 
 **What's new**

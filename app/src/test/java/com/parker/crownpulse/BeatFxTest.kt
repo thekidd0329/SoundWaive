@@ -133,4 +133,69 @@ class BeatFxTest {
             assertTrue(v >= 0f && v < 1f)
         }
     }
+
+    @Test
+    fun latestHitKeepsTheBiggerRipple() {
+        val times = floatArrayOf(1f, 1.05f, 2f)
+        val strengths = floatArrayOf(.9f, .26f, .1f)
+        val out = FloatArray(2)
+        BeatFx.latestHit(times, strengths, 1.02f, out)
+        assertEquals(.02f, out[0], eps)
+        assertEquals(.9f, out[1], eps)
+        // A weak hit just after a big one does not cut the big ripple short.
+        BeatFx.latestHit(times, strengths, 1.06f, out)
+        assertEquals(.06f, out[0], eps)
+        assertEquals(.9f, out[1], eps)
+        // Hits below RIPPLE_MIN_STRENGTH start nothing; old hits have faded out.
+        BeatFx.latestHit(times, strengths, 2.05f, out)
+        assertEquals(-1f, out[0], eps)
+        BeatFx.latestHit(times, strengths, .5f, out)
+        assertEquals(-1f, out[0], eps)
+        BeatFx.latestHit(FloatArray(0), FloatArray(0), 1f, out)
+        assertEquals(-1f, out[0], eps)
+    }
+
+    @Test
+    fun rippleIsADampedWaveBehindItsFront() {
+        val age = .1f
+        val front = age * BeatFx.RIPPLE_SPEED
+        assertEquals(0f, BeatFx.rippleShift(front, age, 1f, 1f), eps)
+        val quarter = 1f / (4f * BeatFx.RIPPLE_WAVES)
+        val expected =
+            BeatFx.RIPPLE_DEPTH * BeatFx.decay(age, BeatFx.RIPPLE_LIFE) *
+                kotlin.math.exp(-quarter * BeatFx.RIPPLE_FOCUS)
+        assertEquals(expected, BeatFx.rippleShift(front + quarter, age, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.rippleShift(.3f, BeatFx.RIPPLE_LIFE, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.rippleShift(.3f, -1f, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.rippleShift(.3f, age, 1f, 0f), eps)
+        for (i in 0..100) {
+            val v = BeatFx.rippleShift(i / 100f, age, 9f, 9f)
+            assertTrue(kotlin.math.abs(v) <= 2 * BeatFx.RIPPLE_DEPTH + eps)
+        }
+    }
+
+    @Test
+    fun centroidIsTheBalancePointOfTheBands() {
+        val bands = FloatArray(12)
+        assertEquals(0f, BeatFx.spectralCentroid(bands, 2, 10), eps)
+        bands[2] = 1f
+        assertEquals(0f, BeatFx.spectralCentroid(bands, 2, 10), eps)
+        bands[11] = 1f
+        assertEquals(.5f, BeatFx.spectralCentroid(bands, 2, 10), eps)
+        bands[2] = 0f
+        assertEquals(1f, BeatFx.spectralCentroid(bands, 2, 10), eps)
+        assertEquals(0f, BeatFx.spectralCentroid(bands, 5, 10), eps)
+    }
+
+    @Test
+    fun rainbowEdgeOnlyOnBrightSounds() {
+        assertEquals(0f, BeatFx.fringeScale(0f, 1f, 1f), eps)
+        assertEquals(BeatFx.FRINGE_SCALE, BeatFx.fringeScale(1f, .7f, 1f), eps)
+        assertEquals(2 * BeatFx.FRINGE_SCALE, BeatFx.fringeScale(5f, 1f, 9f), eps)
+        // Dull sound: loud treble alone gives only a little edge, quiet treble none.
+        assertEquals(BeatFx.FRINGE_SCALE * (.1f / .75f), BeatFx.fringeScale(1f, 0f, 1f), eps)
+        assertEquals(0f, BeatFx.fringeScale(.3f, 0f, 1f), eps)
+        assertEquals(0f, BeatFx.fringeScale(1f, 1f, 0f), eps)
+        assertEquals(0f, BeatFx.fringeScale(Float.NaN, 1f, 1f), eps)
+    }
 }

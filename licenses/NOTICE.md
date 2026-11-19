@@ -25,4 +25,4 @@ Rust dependency lockfile includes the following packages. Platform-specific or b
 
 The crown and demo music were provided by the user for this private build.
 
-Ideas and algorithms used without copying code: the circle-of-fifths key colors follow dedo1911/music-visualizer (MIT); `BeatFx.hash01` is the "lowbias32" integer hash by Chris Wellons (public domain).
+Ideas and algorithms used without copying code: the circle-of-fifths key colors follow dedo1911/music-visualizer (MIT); `BeatFx.hash01` is the "lowbias32" integer hash by Chris Wellons (public domain); the ripple on hits (onsets drive radial ripples) and the rainbow edge driven by treble and spectral centroid follow baditaflorin/synaesthete (MIT).
