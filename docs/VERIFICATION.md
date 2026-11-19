@@ -1,5 +1,11 @@
 # Verification
 
+## 1.7.0 flash on drops and light rays on bass — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Path.reset`/`moveTo`/`lineTo`/`close` reuse one native path; `Canvas.drawPath` fills with the paint's color and alpha).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `findsADropWhereTheMusicJumps`, `noDropsInSteadyOrEmptyMusic`, `dropFlashFadesOut`, `lightRaysFollowTheBass`; in `AnalysisFormatTest.legacyFileWithoutBeatGridStillLoads`, the drop arrays.
+- Not yet checked: everything on a phone, in particular whether drops land where a listener hears them on real songs, preview and export frame time with all nine effects on, and that looks saved in 1.6 open with the flash and rays off.
+
 ## 1.6.0 ripple on hits and rainbow edge — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.drawBitmapMesh` takes `(meshWidth + 1) * (meshHeight + 1)` vertex pairs and draws with the paint's alpha and color filter; it is supported on hardware canvases from API 18, below this app's minSdk 26).

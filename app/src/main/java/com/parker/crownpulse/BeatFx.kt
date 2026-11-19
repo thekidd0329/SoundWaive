@@ -15,8 +15,8 @@ import kotlin.math.sqrt
 /**
  * Pure timing and easing rules for the beat effects (shockwave rings, the punch-in on the
  * first beat of each bar, the snare color split, the note color glow, the hi-hat
- * sparkles, the ripple on hits and the rainbow edge on bright sounds). Everything is a
- * function of music time,
+ * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops and
+ * the light rays on bass). Everything is a function of music time,
  * so the preview and the export draw identical frames. No Android types and no allocation,
  * so the rules are covered by JVM tests and are safe to call every frame.
  */
@@ -75,6 +75,39 @@ object BeatFx {
 
     /** Extra size of the cyan copy at amount 1 and full brightness (the red copy gets twice). */
     const val FRINGE_SCALE = .035f
+
+    /** Seconds of music before a moment that set its "before" level for drop finding. */
+    const val DROP_BEFORE = 2f
+
+    /** Seconds of music after a moment that set its "after" level for drop finding. */
+    const val DROP_AFTER = .35f
+
+    /** Smallest jump in level (0..1) from before to after that counts as a drop. */
+    const val DROP_RISE = .22f
+
+    /** Level (0..1) the music must reach right after the jump to count as a drop. */
+    const val DROP_LEVEL = .5f
+
+    /** Fewest seconds between two drops; within this, the bigger jump wins. */
+    const val DROP_GAP = 6f
+
+    /** A beat this close to a drop (seconds) pulls the drop onto the beat. */
+    const val DROP_SNAP = .12f
+
+    /** How long the flash and the drop wave last, in seconds. */
+    const val DROP_LIFE = .7f
+
+    /** Brightest flash at amount 1 and full drop strength. */
+    const val DROP_FLASH = .45f
+
+    /** Number of light rays around the symbol. */
+    const val RAYS = 12
+
+    /** Bass level below which the light rays stay off. */
+    const val RAY_THRESHOLD = .3f
+
+    /** Ray opacity at amount 1 and full bass. */
+    const val RAY_ALPHA = .18f
 
     /** Index of the last entry of sorted [times] at or before [t], or -1 when none is. */
     fun lastAtOrBefore(times: FloatArray, t: Float): Int {
@@ -308,4 +341,77 @@ object BeatFx {
         val level = ((bright - FRINGE_THRESHOLD) / (1f - FRINGE_THRESHOLD)).coerceIn(0f, 1f)
         return FRINGE_SCALE * amount.coerceIn(0f, 2f) * level
     }
+
+    /**
+     * Finds the drops in a song: moments where the music jumps from a quieter stretch to a
+     * loud one. [level] is one loudness value (0..1) per analysis frame at [fps] frames per
+     * second. For every frame the mean of the [DROP_BEFORE] seconds before it is compared
+     * with the mean of the [DROP_AFTER] seconds after it (prefix sums, so one pass); a jump of
+     * at least [DROP_RISE] up to at least [DROP_LEVEL] is a drop. Drops closer than
+     * [DROP_GAP] keep only the bigger jump, and a drop within [DROP_SNAP] of a beat in sorted
+     * [beats] moves onto that beat. The short-against-long window contrast follows the
+     * MIT-licensed le-director/director-signals ("drop impact"); the flash and wave on the
+     * drop follow the MIT-licensed 5ymph0en1x/Sythm. No code copied.
+     *
+     * Runs once when a song is loaded (it allocates); returns [time, strength 0..1] pairs.
+     */
+    fun findDrops(level: FloatArray, fps: Float, beats: FloatArray): FloatArray {
+        val n = level.size
+        if (n == 0 || !(fps > 0f) || !fps.isFinite()) return FloatArray(0)
+        val before = max(1, (DROP_BEFORE * fps).roundToInt())
+        val after = max(1, (DROP_AFTER * fps).roundToInt())
+        val history = max(1, fps.roundToInt())
+        val gap = DROP_GAP * fps
+        val sum = DoubleArray(n + 1)
+        for (i in 0 until n) {
+            val v = level[i]
+            sum[i + 1] = sum[i] + if (v.isFinite()) v.coerceIn(0f, 1f) else 0f
+        }
+        val frames = ArrayList<Int>()
+        val rises = ArrayList<Float>()
+        for (i in history..n - after) {
+            val lo = max(0, i - before)
+            val pre = ((sum[i] - sum[lo]) / (i - lo)).toFloat()
+            val post = ((sum[i + after] - sum[i]) / after).toFloat()
+            val rise = post - pre
+            if (rise < DROP_RISE || post < DROP_LEVEL) continue
+            val last = frames.size - 1
+            if (last >= 0 && i - frames[last] < gap) {
+                if (rise > rises[last]) {
+                    frames[last] = i
+                    rises[last] = rise
+                }
+                continue
+            }
+            frames.add(i)
+            rises.add(rise)
+        }
+        val out = FloatArray(frames.size * 2)
+        for (k in frames.indices) {
+            var time = frames[k] / fps
+            val j = lastAtOrBefore(beats, time + DROP_SNAP)
+            if (j >= 0 && abs(beats[j] - time) <= DROP_SNAP) time = beats[j]
+            out[2 * k] = time
+            out[2 * k + 1] = (rises[k] / .5f).coerceIn(0f, 1f)
+        }
+        return out
+    }
+
+    /**
+     * Opacity 0..1 of the full-screen flash [age] seconds after a drop of [strength] (0..1) at
+     * [amount] (0..2). 0 before the drop and after [DROP_LIFE].
+     */
+    fun dropFlash(age: Float, strength: Float, amount: Float): Float =
+        (DROP_FLASH * amount.coerceIn(0f, 2f) * strength.coerceIn(0f, 1f) * decay(age, DROP_LIFE))
+            .coerceIn(0f, 1f)
+
+    /** Opacity 0..1 of the light rays for bass level [bass] (0..1.8) at [amount] (0..2). */
+    fun rayAlpha(bass: Float, amount: Float): Float {
+        if (!(bass > RAY_THRESHOLD)) return 0f
+        val level = ((bass - RAY_THRESHOLD) / (1f - RAY_THRESHOLD)).coerceIn(0f, 1f)
+        return (RAY_ALPHA * amount.coerceIn(0f, 2f) * level).coerceIn(0f, 1f)
+    }
+
+    /** Half the angle (radians) of each light ray: rays widen with the bass. */
+    fun rayHalfAngle(bass: Float): Float = .035f + .05f * bass.coerceIn(0f, 1f)
 }

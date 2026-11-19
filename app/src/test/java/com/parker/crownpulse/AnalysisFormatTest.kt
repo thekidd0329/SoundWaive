@@ -57,6 +57,7 @@ class AnalysisFormatTest {
         assertEquals(1, a.onsetTimes.size)
         assertEquals(a.onsets[0].time, a.onsetTimes[0], 1e-6f)
         assertEquals(a.onsets[0].strength, a.onsetStrengths[0], 1e-6f)
+        assertEquals(a.dropTimes.size, a.dropStrengths.size)
         assertTrue(a.beats.isEmpty())
         assertNull(a.barIndex(5f))
         assertEquals(0, a.beatTimes.size)
