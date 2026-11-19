@@ -19,6 +19,8 @@ data class Note(val time: Float, val midi: Int, val duration: Float, val velocit
 
 data class Onset(val time: Float, val strength: Float)
 
+data class Beat(val time: Float, val strength: Float, val downbeat: Boolean)
+
 class Analysis(
     val duration: Float,
     val fps: Float,
@@ -29,6 +31,8 @@ class Analysis(
     val data: FloatArray,
     val notes: List<Note>,
     val onsets: List<Onset>,
+    /** Tracked beats from the optional SWBEAT01 section; empty for older analysis files. */
+    val beats: List<Beat> = emptyList(),
 ) {
     val stride = 8 + bands + waves
     val flow = FloatArray(frames)
@@ -58,6 +62,17 @@ class Analysis(
             if (notes[m].time < t) l = m + 1 else r = m
         }
         return l
+    }
+
+    /** Index of the bar (counted in downbeats) containing [t], or null without a beat grid. */
+    fun barIndex(t: Float): Int? {
+        if (beats.none { it.downbeat }) return null
+        var n = 0
+        for (b in beats) {
+            if (b.time > t) break
+            if (b.downbeat) n++
+        }
+        return n
     }
 
     fun onsetStart(t: Float): Int {
@@ -90,7 +105,18 @@ class Analysis(
             repeat(buf.int) { notes.add(Note(buf.float, buf.float.toInt(), buf.float, buf.float)) }
             val onsets = ArrayList<Onset>()
             repeat(buf.int) { onsets.add(Onset(buf.float, buf.float)) }
-            return Analysis(duration, fps, bpm, frames, bands, waves, data, notes, onsets)
+            return Analysis(duration, fps, bpm, frames, bands, waves, data, notes, onsets, beats(buf))
+        }
+
+        /** Reads the optional trailing beat grid; anything malformed is ignored. */
+        private fun beats(buf: ByteBuffer): List<Beat> {
+            if (buf.remaining() < 12) return emptyList()
+            val magic = ByteArray(8)
+            buf.get(magic)
+            if (String(magic, Charsets.US_ASCII) != "SWBEAT01") return emptyList()
+            val count = buf.int
+            if (count < 0 || count > 200000 || buf.remaining() < count * 12L) return emptyList()
+            return List(count) { Beat(buf.float, buf.float, buf.float > .5f) }
         }
     }
 }

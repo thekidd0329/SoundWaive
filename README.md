@@ -39,7 +39,7 @@ Every push to `main`, pull request, or manual **Android build** run performs Rus
 
 ## Design and limits
 
-Kotlin owns the Android interface, playback and hardware-codec export. Rust analyzes frequency energy, transients, tempo and approximate bass pitches. Preview and export share one deterministic renderer.
+Kotlin owns the Android interface, playback and hardware-codec export. Rust analyzes frequency energy, transients, tempo, beats and bars, and approximate bass pitches. Preview and export share one deterministic renderer.
 
 Keep the app open during analysis/export. Supported input is mono/stereo music up to 30 minutes, subject to the phone's codecs. The bass notes are expressive animation, not verified sheet-music transcription. Physical-phone performance testing remains outstanding; [verification records](docs/VERIFICATION.md) distinguish completed tests from unmeasured behavior.
 

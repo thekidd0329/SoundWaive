@@ -70,7 +70,7 @@ class AudioEngine(private val context: Context) {
             var inDone = false
             var outDone = false
             var totalFrames = 0L
-            var accumulator = 0.0
+            var downsampler = MonoDownsampler(rate)
             var lastProgress = 0L
             BufferedOutputStream(FileOutputStream(pcm), 262144).use { raw ->
                 BufferedOutputStream(FileOutputStream(mono), 65536).use { down ->
@@ -101,6 +101,7 @@ class AudioEngine(private val context: Context) {
                             MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                                 val out = decoder.outputFormat
                                 rate = out.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                                if (totalFrames == 0L) downsampler = MonoDownsampler(rate)
                                 channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                                 encoding =
                                     if (out.containsKey(MediaFormat.KEY_PCM_ENCODING))
@@ -136,12 +137,9 @@ class AudioEngine(private val context: Context) {
                                             output[at++] = (v shr 8).toByte()
                                             sum += v
                                         }
-                                        accumulator += 11025.0 / rate
-                                        if (accumulator >= 1) {
-                                            val v = (sum / channels).toInt()
+                                        downsampler.push(sum / channels)?.let { v ->
                                             down.write(v and 255)
                                             down.write((v shr 8) and 255)
-                                            accumulator -= 1.0
                                         }
                                         totalFrames++
                                     }
