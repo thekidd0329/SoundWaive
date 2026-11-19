@@ -7,7 +7,9 @@ Import a FLAC, choose a look, customize it, and export an MP4 with your music. T
 ## What you can change
 
 - Eight presets, nine built-in symbols, custom artwork, symbol/color locks and saved looks.
-- Palettes, backgrounds, grain, glow, vignette and optional titles.
+- Photo, GIF or video backgrounds behind every effect, synced to the music.
+- Render quality: Fast (360p, upscaled), Balanced (720p) or Full.
+- Palettes, background colors, grain, glow, vignette and optional titles.
 - Particle density, echoes, trails, rings, spectrum layers, glitch, drift, rotation, zoom and shake.
 - Flying staves, estimated bass notes, beat sensitivity, frequency gains and timing offset.
 - Randomized variations with a repeatable seed and bar-based scene changes.

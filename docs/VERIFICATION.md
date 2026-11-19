@@ -1,5 +1,12 @@
 # Verification
 
+## 1.2.0 media backgrounds — November 17, 2026
+
+- One checkpoint run of `./gradlew --no-daemon check :app:assembleDebug` on the build box passed: 19 JVM tests (8 new in `BackgroundMathTest`: loop/hold mapping, invalid times, frame lookup, Render quality working sizes, even/never-upscaled sizes, Fill/Fit/zoom placement, reactivity limits). Lint reported 9 warnings, all from code that was already there (target/compile SDK versions, allowBackup, UsableSpace, four SetTextI18n); none came from the new code. The debug APK is 5.65 MB.
+- `cargo test --release` in `engine/`: 17 passed (the engine is unchanged in this release).
+- A desktop mock of the composite (`/workspace/soundwaive-previews/v1.2.0-background-preview.mp4`, built with ffmpeg on the box) used a synthesized song, a procedurally generated 4-second looping clip decoded at 360x640 and upscaled with bilinear filtering, and the crown pulsing on the engine's analysis of that song. It follows the same `BackgroundMath` formulas.
+- Not yet checked on a phone: video decode across devices (rotation, 10-bit/HDR sources, long-GOP seeks), GIF timing, persisted URI permissions after reboot, and export speed at each Render quality.
+
 ## 1.1.0 beat grid and onset timing — November 17, 2026
 
 Built locally on Linux (x86_64) with Temurin JDK 17.0.21, Gradle 9.6.1 wrapper, AGP 9.4.0, Android SDK 35, build tools 36.0.0, NDK 28.2.13676358 and Rust 1.100.0.

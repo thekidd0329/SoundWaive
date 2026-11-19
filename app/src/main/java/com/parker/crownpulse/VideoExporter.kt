@@ -140,13 +140,24 @@ class VideoExporter {
                     }
                 }
             }
-            bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            // Render at the chosen working size; the encoder pass upscales it to w x h with
+            // bilinear texture filtering on the GPU (and uploads a smaller texture).
+            val work = BackgroundMath.renderSize(w, h, s.s("renderQuality"))
+            bitmap = Bitmap.createBitmap(work.width, work.height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             val total = ceil((end - start) * fps).toInt()
             var lastUpdate = 0L
             for (f in 0 until total) {
                 if (cancel.get()) throw InterruptedException("Export canceled")
-                renderer.draw(canvas, w, h, start + f / fps.toFloat(), track.analysis, s, true)
+                renderer.draw(
+                    canvas,
+                    work.width,
+                    work.height,
+                    start + f / fps.toFloat(),
+                    track.analysis,
+                    s,
+                    true,
+                )
                 egl.draw(bitmap, f * 1_000_000_000L / fps)
                 drain(false)
                 if (System.currentTimeMillis() - lastUpdate > 200) {
