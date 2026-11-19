@@ -1,5 +1,23 @@
 # Changes
 
+## [1.11.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen. Both draw the song's real waveform: the 256 samples the engine has always stored for every analysis frame (about 186 ms of sound) but that nothing drew until now, so the new effects cost no extra analysis time.
+  - **Sound wave ring around the symbol:** the waveform wrapped around the symbol as a glowing loop, the left and right halves mirrored so it closes without a seam. It moves with every sound, not only the beats, and thickens with the bass. On for new looks and presets.
+  - **Sound wave line across the screen:** the waveform as an oscilloscope line across the frame, through the symbol and behind it, tapering to flat at both edges. Off by default (it is a bolder style choice); on in **Spectrum city** and **Ink storm**.
+  - Both start each frame on a rising zero crossing (an oscilloscope's edge trigger), so steady notes stand still instead of sliding, are softened with 1-2-1 weights so the line is smooth, and are scaled to the frame's own peak and the energy, so quiet mixes still move and loud parts stand taller. Near-silence stays a flat line instead of magnified hiss.
+  - Edge-trigger idea from the MIT-licensed cat2151/cat-oscilloscope and alemidev/scope-tui. No code copied.
+  - **More options** adds **Sound wave line height** and **Sound wave ring height** (0 turns them off).
+- `BeatFx`: `waveTrigger`, `wavePeak`, `waveAt`, `waveGain`, `waveTaper` and `waveRingSample`, with JVM tests.
+
+### Changed
+- Stored looks are now `lookVersion` 9. A look stored before 1.11 loads with both new switches off, so it looks the same as before; the rules for older looks are unchanged.
+- **Ink storm** turns on both. **Spectrum city** turns on the line (the ring follows the default, on). **Minimal pulse** turns both off.
+
+### Performance
+- Each effect is one pass over the 256 stored samples for the peak, one short trigger search, 128 points into one reused `Path` and two path draws per frame. No per-frame allocation.
+
 ## [1.10.0] - 2026-11-18
 
 ### Added
