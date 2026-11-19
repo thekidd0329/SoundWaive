@@ -1,5 +1,20 @@
 # SoundWaive release notes
 
+## 1.10.0 — Sound shape and star warp
+
+**What's new**
+- **A shape that moves with the sound.** A soft glowing shape sits behind the crown and its edge dances with the music: the bass moves the bottom, the highs move the top, and the whole shape swells when the bass hits.
+- **Star warp.** Streaks of light fly out from behind the crown to the edges of the screen, like flying through space. They race in the loud parts, surge on kicks and drift slowly in the quiet parts.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make either one stronger or softer.
+
+**Good to know**
+- Looks you saved before 1.10 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- On **Battery saver** the preview shows fewer stars; the exported video always has all of them.
+- Minimal pulse skips both new effects.
+
 ## 1.9.0 — Bounce and orbit dots
 
 **What's new**

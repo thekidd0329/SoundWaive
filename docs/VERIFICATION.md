@@ -1,5 +1,11 @@
 # Verification
 
+## 1.10.0 sound blob and star warp — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Path.quadTo` through outline midpoints for a smooth closed curve, `Canvas.drawPath` with fill and stroke paints, `Canvas.scale(sx, sy, px, py)` for the inner outline undone by `restoreToCount`, `Canvas.drawLine` for the stars).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `blobBandsMirrorWithBassAtTheBottom`, `blobRestsAsACircleAndSwellsWithTheSound`, `warpStarsTravelWithTheFlowAndFadeIn`.
+- Not yet checked: everything on a phone, in particular whether the blob edge reads as music and not noise on real songs, how busy the frame gets with all fifteen effects on, preview and export frame time, and that looks saved in 1.9 open with the blob and warp off.
+
 ## 1.9.0 bounce on beats and orbit dots — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Canvas.scale(sx, sy, px, py)` pivots on the symbol's base and is undone by `restoreToCount` before the rings are drawn; `Canvas.drawCircle` with a fill paint for the dots).
