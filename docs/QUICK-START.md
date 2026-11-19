@@ -1,6 +1,6 @@
 # SoundWaive — your music, your visual
 
-Install **SoundWaive-Android.apk** on your Android phone. Android may ask you to allow installation from your browser or Files app. The app works offline on Android 8 or newer.
+Install **SoundWaive-Android.apk** on your Android phone. Android may ask you to allow installation from your browser or Files app. The app works offline on Android 12 or newer (64-bit phones; it is built for Pixel).
 
 ## Make a video
 

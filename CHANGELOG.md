@@ -1,5 +1,24 @@
 # Changes
 
+## [1.13.0] - 2026-11-19
+
+### Added
+- **Sharpen & clean up background (AI)**, a switch under Studio › Background for photo and video backgrounds. It runs Real-ESRGAN-General-x4v3, a 4x super-resolution model trained on noisy, compressed pictures, through LiteRT 2.3.0's `CompiledModel` API (`AiUpscale.kt`).
+  - Chips are tried in order: the Tensor G5 TPU with an AOT-compiled `*_Google_Tensor_G5.tflite` (if bundled), then the GPU, then the CPU. A TPU load that runs at CPU speed (more than 150 ms per tile) counts as failed.
+  - Pictures are cut into 128 × 128 tiles that overlap by 8 px, with only each tile's middle kept, so no seams show.
+  - Photos are processed once, at import or when the switch is turned on, and saved to `files/background-ai.png` for the preview and every export. Only photos under 1080 px on the short side are processed.
+  - Video frames are processed during export, with one CPU copy per frame. Only frames below the export's background size are processed. Results are cached per frame as JPEG in `cache/ai-video/`, newest clip only, so re-exports skip the model.
+  - The "Your video is ready" box names the chip ("Background sharpened by AI on the TPU/GPU/CPU.").
+  - Any load or run failure is logged and the plain background is used. An export never fails because of it.
+- Bundled model `assets/models/real_esrgan_general_x4v3.tflite` (4.9 MB, float, sha256 `47dbfe34…4b9846`), recorded in `assets.sha256` and `licenses/NOTICE.md` (BSD-3-Clause, `licenses/Real-ESRGAN-LICENSE`).
+- `scripts/fetch_models.sh` re-downloads the model and checks its hash. `scripts/aot_compile_g5.py` compiles it for the Tensor G5 with `ai_edge_litert.aot` (needs Tensor SDK beta access).
+- `docs/AI-UPSCALE.md`: chips, caching, cost, the AOT step, and the pitfalls (version matching, `GOOGLE_TENSOR_BACKEND_ENABLED`, edgetpu_app_service error 16).
+
+### Changed
+- Pixel-only build: minSdk 31 (LiteRT NPU support needs it), arm64-v8a only, extracted native libraries, uncompressed `.tflite` assets. Dependencies: `com.google.ai.edge.litert:litert`, `litert-gpu` and `litert-npu-runtime-google-tensor`, all 2.3.0.
+- Stored looks are now `lookVersion` 10. Looks stored before 1.13 load with the AI switch off, so their background is unchanged. New looks have it on.
+- A video export with the AI switch on, and frames small enough to gain from it, draws the background through the Canvas, so 1.12's zero-copy video texture is skipped for that export.
+
 ## [1.12.0] - 2026-11-19
 
 ### Added

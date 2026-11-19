@@ -1,5 +1,24 @@
 # Verification
 
+## 1.13.0 AI background sharpening (LiteRT) — November 19, 2026
+
+- Nothing was compiled, tested, rendered or run on a phone. The change was checked against:
+  - the LiteRT 2.3.0 Kotlin API: the published reference, plus the class files of `litert-api-2.3.0.aar` for `CompiledModel.create(AssetManager, String, Options, Environment?)`, `Options(vararg Accelerator)`, `createInputBuffers`/`createOutputBuffers`, `TensorBuffer.writeFloat`/`readFloat`, `Environment.create(Context, NpuAcceleratorProvider)`, `getAvailableAccelerators` and `BuiltinNpuAcceleratorProvider(Context)`
+  - the official `litert-samples` NPU app (minSdk 31, arm64-v8a, `useLegacyPackaging`)
+  - Google Maven, where all three 2.3.0 artifacts exist
+- The model was downloaded with curl from Qualcomm AI Hub's v0.67.0 release. Its metadata says input `image` [1,128,128,3] float32 RGB 0..1 and output `upscaled_image` [1,512,512,3]. sha256 `47dbfe34c3492e6f7f7fb2b0ed99794e8e41215c2177821f03e0f5304e4b9846`, checked by `verifyAssets`.
+- No AOT Tensor G5 model is bundled; that needs Christian's Tensor SDK access (`scripts/aot_compile_g5.py`).
+- Risks:
+  - The Kotlin compiler must read LiteRT's Kotlin metadata 2.4. The official sample passes `-Xskip-metadata-version-check`.
+  - The GPU-only options might silently fall back to the CPU, so the chip label could say GPU while the CPU did the work.
+  - Video sharpening is slow: about 40 tiles per 480p frame.
+- Not yet checked: everything on a phone, in particular:
+  - which chip loads on the Pixel 10
+  - the per-tile time
+  - photo and video output quality and seams
+  - cache reuse on re-export
+  - that looks saved in 1.12 open with the switch off
+
 ## 1.12.0 GPU effects pass and zero-copy video backgrounds — November 19, 2026
 
 - Nothing was compiled, tested or rendered on the build box. The change was checked by reading it against the existing sources and the Android and Khronos docs:

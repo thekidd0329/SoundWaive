@@ -12,5 +12,6 @@ gradlew.bat text eol=crlf
 *.m4a binary
 *.analysis binary
 *.jar binary
+*.tflite binary
 # Preserve upstream license formatting verbatim.
 licenses/** whitespace=-blank-at-eof
