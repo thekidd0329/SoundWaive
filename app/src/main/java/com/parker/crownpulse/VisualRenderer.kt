@@ -83,6 +83,8 @@ class VisualRenderer(context: Context) {
     private var vignetteShader: Shader? = null
     private var vignetteKey = Float.NaN
     private var vignetteHeight = Float.NaN
+    /** One grain speck: x, y and size (see [BeatFx.grainSpeck]). */
+    private val speck = FloatArray(3)
     private val path = Path()
     private var h = 1920f
     private val tau = (Math.PI * 2).toFloat()
@@ -639,6 +641,7 @@ class VisualRenderer(context: Context) {
         a: Analysis,
         s: Settings,
         export: Boolean = false,
+        post: PostFx? = null,
     ) {
         h = 1080f * height / width
         val t = (time + s.f("syncOffset") / 1000).coerceIn(0f, a.duration)
@@ -677,13 +680,31 @@ class VisualRenderer(context: Context) {
         c.save()
         c.scale(width / 1080f, width / 1080f)
         c.clipRect(0f, 0f, 1080f, h)
-        c.drawColor(bg or (0xff shl 24))
-        if (s.s("backgroundType") != BackgroundMath.COLOR)
-            background?.frame(time)?.let { drawBackground(c, it, s, bass, kick) }
-        if (s.f("grain") > 0) {
-            ink(white, s.f("grain") * .09f, fill = true)
-            screenRect.set(0f, 0f, 1080f, h)
-            c.drawBitmap(paper, null, screenRect, p)
+        post?.let {
+            it.bg = bg or (0xff shl 24)
+            it.height = h
+            it.mirror = s.b("mirror")
+        }
+        if (post != null && post.ownsBase) {
+            // GPU export: the shader pass paints the background color, the video (straight
+            // from the decoder's texture) and the paper grain under this frame, so the frame
+            // starts transparent. Every layer here is drawn source-over, so the result is the
+            // same as drawing them onto the background.
+            c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            val pulse = s.b("backgroundPulse")
+            post.bgAlpha = BackgroundMath.visibleAlpha(s.f("backgroundDim"), kick, pulse)
+            post.bgZoom = if (pulse) BackgroundMath.pulseZoom(bass) else 1f
+            post.bgFit = s.s("backgroundFit") == BackgroundMath.FIT
+            post.paper = if (s.f("grain") > 0) PostFx.alpha(s.f("grain") * .09f) else 0f
+        } else {
+            c.drawColor(bg or (0xff shl 24))
+            if (s.s("backgroundType") != BackgroundMath.COLOR)
+                background?.frame(time)?.let { drawBackground(c, it, s, bass, kick) }
+            if (s.f("grain") > 0) {
+                ink(white, s.f("grain") * .09f, fill = true)
+                screenRect.set(0f, 0f, 1080f, h)
+                c.drawBitmap(paper, null, screenRect, p)
+            }
         }
         var cx =
             540 +
@@ -694,10 +715,13 @@ class VisualRenderer(context: Context) {
             cx += sin(flow * .7f) * 60 * s.f("drift")
             cy += yy(sin(flow * .57f) * 130 * s.f("drift"))
         }
-        c.translate(
-            sin(frame * 2f) * snare * s.f("shake") * 30,
-            cos(frame * 1.7f) * snare * s.f("shake") * 20,
-        )
+        val shakeX = sin(frame * 2f) * snare * s.f("shake") * 30
+        val shakeY = cos(frame * 1.7f) * snare * s.f("shake") * 20
+        c.translate(shakeX, shakeY)
+        post?.let {
+            it.shakeX = shakeX
+            it.shakeY = shakeY
+        }
         if (s.b("mirror")) {
             c.translate(1080f, 0f)
             c.scale(-1f, 1f)
@@ -942,27 +966,48 @@ class VisualRenderer(context: Context) {
             }
         }
         c.restoreToCount(punchSave)
-        if (tension > 0f) {
-            // The frame darkens a little as the build-up tightens, so the drop lands brighter.
-            val dark = BeatFx.buildDark(tension, buildAmount)
-            if (dark > .005f) rect(c, -100f, -100f, 1280f, h + 200f, Color.BLACK, dark)
+        // Full-frame layers: darkening, flash, grain specks, vignette, titles and fades. On a
+        // GPU export they are left out here and the shader pass adds them in the same order
+        // from [post], in one pass instead of six full-frame blends.
+        val dark = if (tension > 0f) BeatFx.buildDark(tension, buildAmount) else 0f
+        val flash = if (dropAmount > 0f) BeatFx.dropFlash(dropAge, dropPower, dropAmount) else 0f
+        val grainAlpha = (.09f + .13f * high) * s.f("grain") * 2
+        val start = s.f("trimStart")
+        val end =
+            if (s.f("trimEnd") > start) s.f("trimEnd").coerceAtMost(a.duration) else a.duration
+        val fadeIn =
+            if (s.f("fadeIn") > 0) ((time - start) / s.f("fadeIn")).coerceIn(0f, 1f) else 1f
+        val fadeOut =
+            if (s.f("fadeOut") > 0) ((end - time) / s.f("fadeOut")).coerceIn(0f, 1f) else 1f
+        val fade = 1 - min(fadeIn, fadeOut)
+        val fadeAlpha = fade * fade * (3 - 2 * fade)
+        if (post != null) {
+            post.dark = if (dark > .005f) PostFx.alpha(dark) else 0f
+            post.flash = if (flash > .005f) PostFx.alpha(flash) else 0f
+            post.grainBase = BeatFx.grainBase(frame, s.i("seed"))
+            post.grainAlpha = if (s.f("grain") > 0) PostFx.alpha(grainAlpha) else 0f
+            post.vignette =
+                if (s.f("vignette") > 0)
+                    (s.f("vignette") * 200).toInt().coerceIn(0, 255) / 255f
+                else 0f
+            post.fade = if (fade > 0) PostFx.alpha(fadeAlpha) else 0f
+            c.restore()
+            return
         }
-        if (dropAmount > 0f) {
-            // Flash on drops: the whole frame lights up and fades within DROP_LIFE. Drawn a bit
-            // past the edges so screen shake never uncovers a strip.
-            val flash = BeatFx.dropFlash(dropAge, dropPower, dropAmount)
-            if (flash > .005f) rect(c, -100f, -100f, 1280f, h + 200f, white, flash)
-        }
+        // The frame darkens a little as the build-up tightens, so the drop lands brighter.
+        if (dark > .005f) rect(c, -100f, -100f, 1280f, h + 200f, Color.BLACK, dark)
+        // Flash on drops: the whole frame lights up and fades within DROP_LIFE. Drawn a bit
+        // past the edges so screen shake never uncovers a strip.
+        if (flash > .005f) rect(c, -100f, -100f, 1280f, h + 200f, white, flash)
         if (s.f("grain") > 0) {
-            // Hashed positions instead of a new Random every frame; same result in preview
-            // and export.
-            val base = (frame / 2 + 813 + s.i("seed")) * 977
-            repeat((120 * detail).toInt()) {
-                val n = base + it * 3
-                val x = BeatFx.hash01(n) * 1080
-                val y = BeatFx.hash01(n + 1) * h
-                val v = 1 + BeatFx.hash01(n + 2) * 2
-                rect(c, x, y, v, v, white, (.09f + .13f * high) * s.f("grain") * 2)
+            // One speck per 135-unit cell at a hashed spot, so the GPU export draws the very
+            // same specks (see BeatFx.grainSpeck) and preview and export agree.
+            val base = BeatFx.grainBase(frame, s.i("seed"))
+            val rows = ceil(h / BeatFx.GRAIN_CELL).toInt()
+            for (cell in 0 until rows * BeatFx.GRAIN_COLUMNS) {
+                if (detail < 1f && (cell % 4) >= detail * 4) continue
+                BeatFx.grainSpeck(base, cell, speck)
+                rect(c, speck[0], speck[1], speck[2], speck[2], white, grainAlpha)
             }
         }
         if (s.f("vignette") > 0) {
@@ -988,16 +1033,32 @@ class VisualRenderer(context: Context) {
             p.shader = null
         }
         drawText(c, s)
-        val start = s.f("trimStart")
-        val end =
-            if (s.f("trimEnd") > start) s.f("trimEnd").coerceAtMost(a.duration) else a.duration
-        val fadeIn =
-            if (s.f("fadeIn") > 0) ((time - start) / s.f("fadeIn")).coerceIn(0f, 1f) else 1f
-        val fadeOut =
-            if (s.f("fadeOut") > 0) ((end - time) / s.f("fadeOut")).coerceIn(0f, 1f) else 1f
-        val fade = 1 - min(fadeIn, fadeOut)
-        if (fade > 0) rect(c, 0f, 0f, 1080f, h, bg, fade * fade * (3 - 2 * fade))
+        if (fade > 0) rect(c, 0f, 0f, 1080f, h, bg, fadeAlpha)
         c.restore()
+    }
+
+    /** Paper texture for the GPU pass's grain (the same image the Canvas path draws). */
+    internal val paperImage: Bitmap
+        get() = paper
+
+    /**
+     * Titles alone on a transparent [width] x [height] bitmap, placed and mirrored exactly as
+     * [draw] places them but without screen shake (the GPU pass shifts the whole layer per
+     * frame). Null when the look has no titles.
+     */
+    fun titleLayer(width: Int, height: Int, s: Settings): Bitmap? {
+        if (s.s("title").isEmpty() && s.s("subtitle").isEmpty()) return null
+        h = 1080f * height / width
+        val image = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(image)
+        c.scale(width / 1080f, width / 1080f)
+        c.clipRect(0f, 0f, 1080f, h)
+        if (s.b("mirror")) {
+            c.translate(1080f, 0f)
+            c.scale(-1f, 1f)
+        }
+        drawText(c, s)
+        return image
     }
 
     /**

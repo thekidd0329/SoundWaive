@@ -26,6 +26,15 @@ object BeatFx {
     /** How long a ring from an ordinary beat stays visible, in seconds. */
     const val BEAT_RING_LIFE = .5f
 
+    /** Film grain: one speck per square cell this wide (frame units, 1080 = frame width). */
+    const val GRAIN_CELL = 135f
+
+    /** Grain cells across the frame (1080 / [GRAIN_CELL]). */
+    const val GRAIN_COLUMNS = 8
+
+    /** Largest grain speck side, in frame units; specks stay inside their cell. */
+    const val GRAIN_MAX_SIZE = 3f
+
     /** How long a ring from the first beat of a bar stays visible, in seconds. */
     const val DOWNBEAT_RING_LIFE = .9f
 
@@ -704,5 +713,27 @@ object BeatFx {
         val n = 2 * half
         val j = ((point % n) + n) % n
         return if (j <= half) j else n - j
+    }
+
+    /**
+     * Grain seed for animation [frame] (30 per second) and the look's [seed]: the specks
+     * move every second frame. The GPU export shader gets the same number.
+     */
+    fun grainBase(frame: Int, seed: Int): Int = (frame / 2 + 813 + seed) * 977
+
+    /**
+     * Grain speck for [cell] (row-major, [GRAIN_COLUMNS] per row) and [base] from [grainBase]:
+     * writes x, y (top-left corner) and side length into [out] (size 3). Each speck lies
+     * wholly inside its own cell, so the GPU shader only has to look at the cell a pixel is
+     * in. The shader in GpuFx.kt repeats this exact integer math.
+     */
+    fun grainSpeck(base: Int, cell: Int, out: FloatArray) {
+        val n = base + cell * 3
+        val col = cell % GRAIN_COLUMNS
+        val row = cell / GRAIN_COLUMNS
+        val span = (GRAIN_CELL - GRAIN_MAX_SIZE) / GRAIN_CELL
+        out[0] = (col + hash01(n) * span) * GRAIN_CELL
+        out[1] = (row + hash01(n + 1) * span) * GRAIN_CELL
+        out[2] = 1f + hash01(n + 2) * (GRAIN_MAX_SIZE - 1f)
     }
 }
