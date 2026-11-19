@@ -1161,7 +1161,8 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("Your video is ready")
                         .setMessage(
-                            "${result.width} × ${result.height} · ${formatTime(result.duration)} · full audio"
+                            "${result.width} × ${result.height} · ${formatTime(result.duration)} · full audio" +
+                                (result.notice?.let { "\n\n$it" } ?: "")
                         )
                         .setPositiveButton("Play") { _, _ -> openExport() }
                         .setNeutralButton("Share") { _, _ -> shareExport() }

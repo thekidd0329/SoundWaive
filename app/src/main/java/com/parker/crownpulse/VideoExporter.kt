@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.SurfaceTexture
 import android.media.*
 import android.opengl.*
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -21,7 +22,77 @@ class VideoExporter {
         val height: Int,
         val frames: Int,
         val duration: Float,
+        /** One plain-language line when the export had to use a slower drawing path. */
+        val notice: String? = null,
     )
+
+    /** The GPU effects path for one export (see [openEffects]). */
+    private class Effects(
+        val recorder: SceneRecorder,
+        val post: GpuPost,
+        val fx: PostFx,
+        /** Set when the video background decodes straight into [post]'s texture. */
+        val video: VideoBackground?,
+    ) {
+        fun close() {
+            try {
+                recorder.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "GPU scene release failed", e)
+            }
+            video?.useBitmaps()
+            post.release()
+        }
+    }
+
+    /**
+     * Sets up the GPU effects path on the current encoder context: the scene renders with a
+     * transparent background into [canvas], and one shader pass adds the background, a
+     * zero-copy video background and the full-frame effects. Null (with a log line) when the
+     * phone can't, so the export keeps the Canvas path.
+     */
+    private fun openEffects(
+        egl: EncoderSurface,
+        canvas: Surface,
+        work: BackgroundMath.Size,
+        outWidth: Int,
+        s: Settings,
+        renderer: VisualRenderer,
+    ): Effects? {
+        if (Build.VERSION.SDK_INT < 29) {
+            Log.i(TAG, "GPU effects need Android 10; using the Canvas path")
+            return null
+        }
+        if (!egl.es3 || !GpuPost.supported()) {
+            Log.w(TAG, "GPU effects need OpenGL ES 3 with external textures; using the Canvas path")
+            return null
+        }
+        var post: GpuPost? = null
+        var title: Bitmap? = null
+        var video: VideoBackground? = null
+        try {
+            title = renderer.titleLayer(work.width, work.height, s)
+            val program = GpuPost(renderer.paperImage, title, outWidth)
+            post = program
+            val fx = PostFx()
+            val source = renderer.background as? VideoBackground
+            if (source != null && s.s("backgroundType") == BackgroundMath.VIDEO) {
+                val texture = program.openVideo(source.size.width, source.size.height)
+                if (source.useTexture(texture)) video = source
+            }
+            fx.ownsBase = s.s("backgroundType") == BackgroundMath.COLOR || video != null
+            val recorder = SceneRecorder(canvas, work.width, work.height)
+            Log.i(TAG, "GPU effects on (zero-copy video: ${video != null})")
+            return Effects(recorder, program, fx, video)
+        } catch (e: Exception) {
+            Log.w(TAG, "GPU effects unavailable; using the Canvas path", e)
+            video?.useBitmaps()
+            post?.release()
+            return null
+        } finally {
+            title?.recycle()
+        }
+    }
 
     fun dimensions(s: Settings): Pair<Int, Int> {
         val short = if (s.s("resolution") == "720p") 720 else 1080
@@ -62,6 +133,8 @@ class VideoExporter {
         val ae = MediaExtractor()
         var muxStarted = false
         var success = false
+        var effects: Effects? = null
+        var notice: String? = null
         try {
             val encoderDelay =
                 encodeAudio(track, start, end, audio, cancel) {
@@ -152,6 +225,10 @@ class VideoExporter {
             // If the GPU path is unavailable or fails, the CPU bitmap path takes over.
             val work = BackgroundMath.renderSize(w, h, s.s("renderQuality"))
             var gpu: Surface? = egl.openCanvas(work.width, work.height)
+            // Fastest path: the scene on the GPU with a transparent background, then one
+            // shader pass for the background, video and full-frame effects (see GpuPost).
+            effects = gpu?.let { openEffects(egl, it, work, w, s, renderer) }
+            if (effects == null) notice = SLOWER_PATH
             var canvas: Canvas? = null
             val total = ceil((end - start) * fps).toInt()
             var lastUpdate = 0L
@@ -160,8 +237,41 @@ class VideoExporter {
                 val time = start + f / fps.toFloat()
                 val nanos = f * 1_000_000_000L / fps
                 var drawn = false
+                val fast = effects
+                if (fast != null) {
+                    try {
+                        fast.video?.let { video ->
+                            video.frame(time) // decodes straight into the GPU texture
+                            if (video.takeTextureFrame()) fast.post.latchVideo()
+                        }
+                        fast.recorder.draw { c ->
+                            renderer.draw(
+                                c,
+                                work.width,
+                                work.height,
+                                time,
+                                track.analysis,
+                                s,
+                                true,
+                                fast.fx,
+                            )
+                        }
+                        egl.drawEffects(nanos, fast.post, fast.fx)
+                        drawn = true
+                    } catch (e: InterruptedException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // The scene renderer owned the GPU canvas, so finish on the CPU path.
+                        Log.w(TAG, "GPU effects failed at frame $f; continuing on the CPU path", e)
+                        effects = null
+                        fast.close()
+                        egl.closeCanvas()
+                        gpu = null
+                        notice = STOPPED_PATH
+                    }
+                }
                 val target = gpu
-                if (target != null) {
+                if (!drawn && target != null) {
                     try {
                         val c = target.lockHardwareCanvas()
                         try {
@@ -177,6 +287,7 @@ class VideoExporter {
                         Log.w(TAG, "GPU export path failed; continuing on the CPU path", e)
                         egl.closeCanvas()
                         gpu = null
+                        notice = STOPPED_PATH
                     }
                 }
                 if (!drawn) {
@@ -233,8 +344,14 @@ class VideoExporter {
             )
             success = true
             progress("Video ready", 1f)
-            return Result(output, w, h, total, end - start)
+            return Result(output, w, h, total, end - start, notice)
         } finally {
+            // GL objects first, while the encoder's context is still current.
+            try {
+                effects?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "GPU effects release failed", e)
+            }
             try {
                 codec?.stop()
             } catch (_: Exception) {}
@@ -417,49 +534,72 @@ class VideoExporter {
         private val frameLock = Object()
         private var frameReady = false
 
+        /** True when this is an OpenGL ES 3 context (needed for the GPU effects pass). */
+        val es3: Boolean
+
         init {
             val versions = IntArray(2)
             check(EGL14.eglInitialize(display, versions, 0, versions, 1))
-            val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
-            val count = IntArray(1)
-            check(
-                EGL14.eglChooseConfig(
-                    display,
-                    intArrayOf(
-                        EGL14.EGL_RED_SIZE,
-                        8,
-                        EGL14.EGL_GREEN_SIZE,
-                        8,
-                        EGL14.EGL_BLUE_SIZE,
-                        8,
-                        EGL14.EGL_ALPHA_SIZE,
-                        8,
-                        EGL14.EGL_RENDERABLE_TYPE,
-                        EGL14.EGL_OPENGL_ES2_BIT,
-                        0x3142,
+            fun choose(renderable: Int): android.opengl.EGLConfig? {
+                val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
+                val count = IntArray(1)
+                val found =
+                    EGL14.eglChooseConfig(
+                        display,
+                        intArrayOf(
+                            EGL14.EGL_RED_SIZE,
+                            8,
+                            EGL14.EGL_GREEN_SIZE,
+                            8,
+                            EGL14.EGL_BLUE_SIZE,
+                            8,
+                            EGL14.EGL_ALPHA_SIZE,
+                            8,
+                            EGL14.EGL_RENDERABLE_TYPE,
+                            renderable,
+                            0x3142, // EGL_RECORDABLE_ANDROID
+                            1,
+                            EGL14.EGL_NONE,
+                        ),
+                        0,
+                        configs,
+                        0,
                         1,
-                        EGL14.EGL_NONE,
-                    ),
-                    0,
-                    configs,
-                    0,
-                    1,
-                    count,
-                    0,
-                ) && count[0] > 0
-            )
-            context =
-                EGL14.eglCreateContext(
-                    display,
-                    configs[0],
-                    EGL14.EGL_NO_CONTEXT,
-                    intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE),
-                    0,
-                )
+                        count,
+                        0,
+                    ) && count[0] > 0
+                return if (found) configs[0] else null
+            }
+            // OpenGL ES 3 first (the GPU effects pass needs it), else ES 2 as before.
+            var config = choose(EGLExt.EGL_OPENGL_ES3_BIT_KHR)
+            var made =
+                config?.let {
+                    EGL14.eglCreateContext(
+                        display,
+                        it,
+                        EGL14.EGL_NO_CONTEXT,
+                        intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE),
+                        0,
+                    )
+                } ?: EGL14.EGL_NO_CONTEXT
+            es3 = made != EGL14.EGL_NO_CONTEXT
+            if (!es3) {
+                Log.i(TAG, "OpenGL ES 3 unavailable for export; using ES 2")
+                config = checkNotNull(choose(EGL14.EGL_OPENGL_ES2_BIT))
+                made =
+                    EGL14.eglCreateContext(
+                        display,
+                        config,
+                        EGL14.EGL_NO_CONTEXT,
+                        intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE),
+                        0,
+                    )
+            }
+            context = made
             eglSurface =
                 EGL14.eglCreateWindowSurface(
                     display,
-                    configs[0],
+                    checkNotNull(config),
                     surface,
                     intArrayOf(EGL14.EGL_NONE),
                     0,
@@ -575,8 +715,18 @@ class VideoExporter {
                 null
             }
 
-        /** Waits for the frame just posted to the canvas Surface and encodes it at [nanos]. */
-        fun drawCanvas(nanos: Long) {
+        /**
+         * Waits for the scene just rendered into the canvas Surface and encodes it at [nanos]
+         * through the GPU effects pass [post], which adds the layers described by [fx].
+         */
+        fun drawEffects(nanos: Long, post: GpuPost, fx: PostFx) {
+            latchCanvas()
+            post.draw(oesTexture, transform, vertices, oesCoords, w, h, fx)
+            present(nanos)
+        }
+
+        /** Waits for the frame just posted to the canvas Surface and latches it. */
+        private fun latchCanvas() {
             val st = checkNotNull(canvasTexture) { "GPU canvas is closed" }
             synchronized(frameLock) {
                 val deadline = System.nanoTime() + FRAME_TIMEOUT_NS
@@ -589,6 +739,11 @@ class VideoExporter {
             }
             st.updateTexImage()
             st.getTransformMatrix(transform)
+        }
+
+        /** Waits for the frame just posted to the canvas Surface and encodes it at [nanos]. */
+        fun drawCanvas(nanos: Long) {
+            latchCanvas()
             GLES20.glViewport(0, 0, w, h)
             GLES20.glUseProgram(oesProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -682,5 +837,9 @@ class VideoExporter {
 
     private companion object {
         const val TAG = "SoundWaive"
+        const val SLOWER_PATH =
+            "This phone couldn't use the fast GPU effects, so this video used the standard path."
+        const val STOPPED_PATH =
+            "The fast GPU path stopped partway, so the rest of this video used the slower path."
     }
 }

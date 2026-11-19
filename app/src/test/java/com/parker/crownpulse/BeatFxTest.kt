@@ -410,4 +410,22 @@ class BeatFxTest {
         for (j in 1 until half)
             assertEquals(BeatFx.waveRingSample(j, half), BeatFx.waveRingSample(2 * half - j, half))
     }
+
+    @Test
+    fun grainSpecksStayInsideTheirCells() {
+        val out = FloatArray(3)
+        for (base in intArrayOf(BeatFx.grainBase(0, 8139), BeatFx.grainBase(901, 7), -977))
+            for (cell in 0 until 8 * 15) {
+                BeatFx.grainSpeck(base, cell, out)
+                val left = (cell % BeatFx.GRAIN_COLUMNS) * BeatFx.GRAIN_CELL
+                val top = (cell / BeatFx.GRAIN_COLUMNS) * BeatFx.GRAIN_CELL
+                assertTrue(out[2] >= 1f && out[2] <= BeatFx.GRAIN_MAX_SIZE)
+                assertTrue(out[0] >= left && out[0] + out[2] <= left + BeatFx.GRAIN_CELL + 1e-3f)
+                assertTrue(out[1] >= top && out[1] + out[2] <= top + BeatFx.GRAIN_CELL + 1e-3f)
+            }
+        // The specks move every second frame, like the grain before 1.12.
+        assertEquals(BeatFx.grainBase(10, 3), BeatFx.grainBase(11, 3))
+        assertNotEquals(BeatFx.grainBase(10, 3), BeatFx.grainBase(12, 3))
+        assertEquals((5 + 813 + 3) * 977, BeatFx.grainBase(10, 3))
+    }
 }

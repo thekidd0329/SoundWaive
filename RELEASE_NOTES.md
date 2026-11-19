@@ -1,5 +1,16 @@
 # SoundWaive release notes
 
+## 1.12.0 — Faster export on the GPU
+
+**What's new**
+- **Faster exports.** The vignette, film grain, flash on drops, build-up darkening, titles and fades are now added by your phone's graphics chip in one step while the video is written, instead of being painted one layer at a time.
+- **Much faster video backgrounds.** A video background now goes straight from the phone's video decoder to the graphics chip without being copied in between. Exports with a video background should be the biggest speed-up.
+
+**Good to know**
+- Your videos should look the same as before, and saved looks are unchanged.
+- If your phone can't use the fast path, the export still works the old way, and the "Your video is ready" message says so in one line.
+- The preview on screen works the same as before.
+
 ## 1.11.0 — Sound wave line and ring
 
 **What's new**
