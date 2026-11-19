@@ -1,5 +1,23 @@
 # Verification
 
+## 1.12.0 GPU effects pass and zero-copy video backgrounds — November 19, 2026
+
+- Nothing was compiled, tested or rendered on the build box. The change was checked by reading it against the existing sources and the Android and Khronos docs:
+  - `HardwareRenderer`/`RenderNode` (API 29): `setOpaque(false)`, `setContentRoot`, `setSurface`, `beginRecording`/`endRecording` and `createRenderRequest().syncAndDraw()` with its `SYNC_*` result bits
+  - `MediaCodec.setOutputSurface` (API 23)
+  - `SurfaceTexture.updateTexImage`/`getTransformMatrix`
+  - `EGLExt.EGL_OPENGL_ES3_BIT_KHR` with `EGL_CONTEXT_CLIENT_VERSION` 3
+  - GLSL ES 3.00 with `GL_OES_EGL_image_external_essl3`
+  - `GLES30.glUniform1ui`
+  - a framebuffer object for the 48 × 48 blur
+- Compositing equivalence: `VisualRenderer` uses only source-over drawing (color filters, no blend modes). A transparent scene composited over the background is therefore the same as drawing it onto the background. The full-frame layers are repeated in the Canvas order with Paint-rounded alphas: darkening, flash, specks, vignette, titles, fade. Screen shake moves them, and mirror flips them.
+- New JVM test to run (`./gradlew :app:testDebugUnitTest`): `BeatFxTest.grainSpecksStayInsideTheirCells`.
+- Not yet checked: everything on a phone, in particular:
+  - that the Pixel (Tensor G5, PowerVR) logs "GPU effects on (zero-copy video: true)" for a video-background export
+  - export time against 1.11 with a color and a video background
+  - that GPU and Canvas exports look the same (vignette, grain, flash, titles with shake and mirror, Fit video edges)
+  - that forcing the fallback produces the notice and a correct video
+
 ## 1.11.0 sound wave line and ring — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources, the engine's analysis layout (`engine/src/lib.rs`: 256 waveform samples per frame at offset `8 + BANDS`, spanning the 2048-sample window at 11025 Hz) and the Android API docs (`Path.moveTo`/`lineTo`/`close` into one reused path, `Canvas.drawPath` with stroke paints).

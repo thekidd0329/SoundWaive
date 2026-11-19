@@ -1,5 +1,28 @@
 # Changes
 
+## [1.12.0] - 2026-11-19
+
+### Added
+- **GPU effects pass for export** (`GpuFx.kt`). On Android 10+ with OpenGL ES 3 (the Pixel's Tensor G5 PowerVR GPU included), each frame's scene is rendered by the GPU with a transparent background (`HardwareRenderer` + `RenderNode` into the existing SurfaceTexture, `setOpaque(false)`), and one GLES 3.0 fragment shader writes the video frame. In one pass it adds the background color, the video background, paper grain, the scene, build-up darkening, the drop flash, grain specks, the vignette, the titles and the fades. Before 1.12 these were six full-frame Canvas blends. Every scene layer is drawn source-over, so drawing the scene over the background in the shader gives the same result as before. Alphas are rounded to 1/255 the way a Paint rounds them.
+- **Zero-copy video backgrounds in export.** The background decoder is switched with `MediaCodec.setOutputSurface` to write each frame straight into an external texture that the GPU pass samples. In 1.11, every frame was drawn into a pbuffer, read back with `glReadPixels`, copied into a bitmap and uploaded again by the Canvas. Those four steps are gone. The blurred edges behind **Fit** videos come from a 48 × 48 copy made on the GPU only when a new video frame arrives, the same bilinear shrink the Canvas path does.
+- The shader is written for tile-based PowerVR GPUs:
+  - no loops and no `texelFetch` on external textures
+  - no `glFinish`, and one pass, with no ping-pong between framebuffers
+  - clamp-to-edge sampling, so texture sizes don't need to be powers of two
+  - coordinates and hashing in highp, colors in mediump
+  - grain timing reduced to an integer on the CPU
+  - both programs compiled and linked when the export starts
+- Automatic fallback. If GLES 3, the external-texture extension, a shader compile or link, or the scene renderer fails, the export uses the 1.11 Canvas path. If the GPU path fails partway, the remaining frames use the CPU path. Each case is logged, and the "Your video is ready" box adds one plain line saying the slower path was used.
+- `BeatFx.grainBase` and `BeatFx.grainSpeck`, with a JVM test.
+
+### Changed
+- Film grain specks now sit one per 135-unit cell at a hashed spot, instead of 120 hashed spots anywhere. The density, size, brightness and every-second-frame movement are unchanged. The GPU shader repeats the same integer hash bit for bit, so the preview and the export show the same specks.
+- The export's EGL context is OpenGL ES 3 when available, otherwise ES 2 as before.
+
+### Unchanged
+- The preview still draws on Canvas, and no settings were added or changed, so saved looks open and render as before.
+- The glow, note glow, ripple, colour split and rainbow edge stay as Canvas layers on the GPU-rendered scene. They sit between other layers (behind the crown, under the orbit dots and rings), so a final full-frame pass can't place them without changing the picture. They were already rasterized by the GPU through the hardware Canvas.
+
 ## [1.11.0] - 2026-11-18
 
 ### Added
