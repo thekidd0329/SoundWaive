@@ -36,6 +36,11 @@ class Analysis(
 ) {
     val stride = 8 + bands + waves
     val flow = FloatArray(frames)
+    /** Beat-grid times and flags as primitive arrays so per-frame lookups never allocate. */
+    val beatTimes = FloatArray(beats.size) { beats[it].time }
+    val beatStrengths = FloatArray(beats.size) { beats[it].strength }
+    val beatIsDownbeat = BooleanArray(beats.size) { beats[it].downbeat }
+    val downbeatTimes = beats.filter { it.downbeat }.map { it.time }.toFloatArray()
 
     init {
         var sum = 0f
@@ -121,12 +126,24 @@ class Analysis(
     }
 }
 
-class Settings(var json: JSONObject = JSONObject()) {
+/**
+ * One look. `Settings()` is a brand-new look in the current format; `Settings(json)` reads a
+ * stored look (session, saved look or imported file) and upgrades it from its `lookVersion`.
+ */
+class Settings(var json: JSONObject = newLook()) {
     init {
         sanitize()
     }
 
     private fun sanitize() {
+        // Looks stored before 1.4 have no lookVersion and were made without beat effects.
+        // Keep their appearance: a missing effect switch there means off. New looks and
+        // presets are written with the current version, so for them a missing switch still
+        // falls back to DEFAULTS (on).
+        if (json.optInt(LOOK_VERSION_KEY, 1) < BEAT_EFFECTS_VERSION) {
+            for (k in BEAT_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+            json.put(LOOK_VERSION_KEY, LOOK_VERSION)
+        }
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
             if (!json.has("backgroundType"))
@@ -176,6 +193,9 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "syncOffset" to (-500.0..500.0),
                 "backgroundDim" to (0.0..1.0),
                 "tempoOverride" to (0.0..240.0),
+                "shockwaveAmount" to (0.0..2.0),
+                "punchAmount" to (0.0..2.0),
+                "colorSplitAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -264,7 +284,7 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "backgroundPulse",
             )
         val retained = sessionKeys.filter { json.has(it) }.associateWith { json.get(it) }
-        json = JSONObject()
+        json = newLook()
         set("preset", name)
         when (name) {
             "Neon orbit" -> {
@@ -322,6 +342,11 @@ class Settings(var json: JSONObject = JSONObject()) {
                 set("spokes", false)
                 set("grain", .04)
                 set("drift", .2)
+                // Beat effects spelled out so the preset never depends on DEFAULTS or on
+                // the stored-look upgrade: rings and bar punch on, color split off.
+                set("shockwaves", true)
+                set("downbeatPunch", true)
+                set("colorSplit", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -377,6 +402,15 @@ class Settings(var json: JSONObject = JSONObject()) {
     }
 
     companion object {
+        /** Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. */
+        const val LOOK_VERSION_KEY = "lookVersion"
+        const val BEAT_EFFECTS_VERSION = 2
+        const val LOOK_VERSION = 2
+        val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
+
+        /** Empty JSON for a brand-new look, stamped with the current format version. */
+        fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
+
         val PRESETS =
             listOf(
                 "Original crown",
@@ -489,6 +523,14 @@ class Settings(var json: JSONObject = JSONObject()) {
                 "textColor" to "#F5F5F5",
                 "syncOffset" to 0.0,
                 "tempoOverride" to 0.0,
+                // 1.4 beat effects: on for new looks and presets. Looks stored before 1.4
+                // (no lookVersion) get the three switches set to off when they load.
+                "shockwaves" to true,
+                "shockwaveAmount" to 1.0,
+                "downbeatPunch" to true,
+                "punchAmount" to 1.0,
+                "colorSplit" to true,
+                "colorSplitAmount" to 1.0,
             )
     }
 }

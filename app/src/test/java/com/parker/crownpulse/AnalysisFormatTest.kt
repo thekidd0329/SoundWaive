@@ -52,6 +52,8 @@ class AnalysisFormatTest {
         assertEquals(1, a.onsets.size)
         assertTrue(a.beats.isEmpty())
         assertNull(a.barIndex(5f))
+        assertEquals(0, a.beatTimes.size)
+        assertEquals(0, a.downbeatTimes.size)
     }
 
     @Test
@@ -64,6 +66,11 @@ class AnalysisFormatTest {
         assertEquals(1, a.barIndex(.1f))
         assertEquals(2, a.barIndex(2.0f))
         assertEquals(3, a.barIndex(5.9f))
+        // Primitive copies used by the beat effects.
+        assertEquals(12, a.beatTimes.size)
+        assertEquals(2.5f, a.beatTimes[5], 1e-6f)
+        assertTrue(a.beatIsDownbeat[8])
+        assertArrayEquals(floatArrayOf(0f, 2f, 4f), a.downbeatTimes, 1e-6f)
     }
 
     @Test

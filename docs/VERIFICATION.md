@@ -1,5 +1,16 @@
 # Verification
 
+## 1.4.1 saved-look compatibility — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it. `Settings` uses `android.graphics.Color` and `org.json`, which the JVM unit tests do not load, so the look upgrade has no unit test; check it on a phone.
+- Not yet checked: loading a look saved in 1.3 (effects off), a new look and each preset (effects on, Minimal pulse without color split), an imported 1.3 settings file, and the session restored after updating from 1.3.
+
+## 1.4.0 beat effects — November 18, 2026
+
+- Per the owner's rule, nothing was compiled, tested or rendered on the build box. The code was checked by reading it against the existing sources and the Android/Kotlin API documentation only.
+- New JVM tests for the owner to run (`./gradlew :app:testDebugUnitTest`): `BeatFxTest` (beat lookup, beat/bar ages on the tracked and fixed grids, cubic fade, ease-out ring travel, bounded punch-in, snare color-split threshold) and new assertions in `AnalysisFormatTest.beatGridIsParsedAndCountsBars` / `legacyFileWithoutBeatGridStillLoads` for the primitive beat arrays.
+- Not yet checked: everything on a phone, in particular that preview and export show the same rings/punch/split, frame time with all three effects on, and how the effects read on real songs with weak or missing downbeats.
+
 ## 1.3.1 tempo octave review fix — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it.

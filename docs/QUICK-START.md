@@ -21,6 +21,7 @@ You can customize:
 - **Identity:** nine built-in symbols, no symbol, or your own artwork; color, size, opacity, position and mirroring.
 - **Atmosphere:** eight palettes, custom accent colors, a color, photo, GIF or video background (Dim and "Pulse with the beat" sit right under it), grain, vignette and glow.
 - **Motion:** drift, rotation, zoom, shake, speed, smoothing, scene changes and variation seed.
+- **Beat effects (Studio):** rings on every beat, a punch-in on the first beat of each bar and a color split on snares, all on by default. **More options** sets how strong each one is. **Beat sensitivity** and **Bass sensitivity** sit right above them.
 - **Layers:** echoes, trails, rings, filaments, spectrum spokes/bars, grid, glitch strips and particles.
 - **Music notation:** flying staves, note size, layer count and scroll speed.
 - **Reaction:** bass/mids/highs, sensitivity, beat source, timing offset and tempo override.
