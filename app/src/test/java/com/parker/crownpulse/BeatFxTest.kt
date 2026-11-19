@@ -239,4 +239,43 @@ class BeatFxTest {
         assertEquals(0f, BeatFx.rayAlpha(Float.NaN, 1f), eps)
         assertTrue(BeatFx.rayHalfAngle(1f) > BeatFx.rayHalfAngle(0f))
     }
+
+    @Test
+    fun buildUpRisesIntoTheDrop() {
+        val drops = floatArrayOf(10f, 30f)
+        val strong = floatArrayOf(1f, 1f)
+        // Starts BUILD_TIME before the drop, rises as a square, gone on and after the drop.
+        assertEquals(0f, BeatFx.buildTension(drops, strong, 10f - BeatFx.BUILD_TIME - .1f), eps)
+        assertEquals(.25f, BeatFx.buildTension(drops, strong, 10f - BeatFx.BUILD_TIME / 2), eps)
+        assertTrue(BeatFx.buildTension(drops, strong, 9.99f) > .99f)
+        assertEquals(0f, BeatFx.buildTension(drops, strong, 10f), eps)
+        assertEquals(0f, BeatFx.buildTension(drops, strong, 40f), eps)
+        // A weak drop gets half the build-up.
+        assertTrue(BeatFx.buildTension(drops, floatArrayOf(0f, 0f), 9.99f) < .51f)
+        assertEquals(0f, BeatFx.buildTension(FloatArray(0), FloatArray(0), 5f), eps)
+        assertEquals(0f, BeatFx.buildTension(drops, strong, Float.NaN), eps)
+    }
+
+    @Test
+    fun noBuildUpRightAfterAnotherDrop() {
+        // The second drop comes 1.5 s after the first: its build-up would start when the
+        // first flash ends (0.8 s left), shorter than BUILD_MIN, so there is none.
+        val drops = floatArrayOf(10f, 11.5f)
+        val strong = floatArrayOf(1f, 1f)
+        assertEquals(0f, BeatFx.buildTension(drops, strong, 11.4f), eps)
+        assertEquals(1f + BeatFx.BUILD_ZOOM, BeatFx.buildZoom(1f, 1f), eps)
+        assertEquals(1f, BeatFx.buildZoom(0f, 2f), eps)
+        assertEquals(2 * BeatFx.BUILD_DARK, BeatFx.buildDark(1f, 9f), eps)
+        assertEquals(0f, BeatFx.buildRingFall(-1f), eps)
+        assertEquals(1f, BeatFx.buildRingFall(BeatFx.BUILD_RING_LIFE), eps)
+    }
+
+    @Test
+    fun tiltRocksBothWaysAndSettles() {
+        assertEquals(BeatFx.TILT_DEGREES, BeatFx.tiltDegrees(0f, false, 1f, 1f), eps)
+        assertEquals(-BeatFx.TILT_DEGREES, BeatFx.tiltDegrees(0f, true, 1f, 1f), eps)
+        assertEquals(BeatFx.TILT_DEGREES / 2, BeatFx.tiltDegrees(0f, false, 0f, 1f), eps)
+        assertEquals(0f, BeatFx.tiltDegrees(BeatFx.TILT_LIFE, false, 1f, 1f), eps)
+        assertEquals(0f, BeatFx.tiltDegrees(-1f, true, 1f, 1f), eps)
+    }
 }

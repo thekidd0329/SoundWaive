@@ -161,8 +161,9 @@ class Settings(var json: JSONObject = newLook()) {
         // Keep their appearance: a missing effect switch there means off. New looks and
         // presets are written with the current version, so for them a missing switch still
         // falls back to DEFAULTS (on).
-        // The same rule for the 1.5 glow effects, the 1.6 ripple and rainbow edge and the 1.7
-        // drop flash and light rays: looks stored before them keep them off.
+        // The same rule for the 1.5 glow effects, the 1.6 ripple and rainbow edge, the 1.7
+        // drop flash and light rays and the 1.8 build-up and beat tilt: looks stored before
+        // them keep them off.
         val stored = json.optInt(LOOK_VERSION_KEY, 1)
         if (stored < BEAT_EFFECTS_VERSION)
             for (k in BEAT_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
@@ -172,6 +173,8 @@ class Settings(var json: JSONObject = newLook()) {
             for (k in RIPPLE_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < DROP_EFFECTS_VERSION)
             for (k in DROP_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+        if (stored < BUILD_EFFECTS_VERSION)
+            for (k in BUILD_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < LOOK_VERSION) json.put(LOOK_VERSION_KEY, LOOK_VERSION)
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
@@ -231,6 +234,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "brightFringeAmount" to (0.0..2.0),
                 "dropFlashAmount" to (0.0..2.0),
                 "lightRaysAmount" to (0.0..2.0),
+                "buildUpAmount" to (0.0..2.0),
+                "beatTiltAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -342,14 +347,16 @@ class Settings(var json: JSONObject = newLook()) {
                 set("shake", .35)
                 set("background", "#171717")
                 // Black and white look: no colored glow or rainbow edge; sparkles, the
-                // ripple, the drop flash and the light rays stay (they use the look's own
-                // black and white colors).
+                // ripple, the drop flash, the light rays, the build-up and the beat tilt stay
+                // (they use the look's own black and white colors or no color at all).
                 set("noteGlow", false)
                 set("sparkles", true)
                 set("hitRipple", true)
                 set("brightFringe", false)
                 set("dropFlash", true)
                 set("lightRays", true)
+                set("buildUp", true)
+                set("beatTilt", true)
             }
             "Cosmic bloom" -> {
                 set("palette", "Aurora")
@@ -397,6 +404,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("brightFringe", false)
                 set("dropFlash", false)
                 set("lightRays", false)
+                set("buildUp", false)
+                set("beatTilt", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -455,18 +464,21 @@ class Settings(var json: JSONObject = newLook()) {
         /**
          * Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. 3: 1.5 note
          * color glow and hi-hat sparkles. 4: 1.6 ripple on hits and rainbow edge. 5: 1.7
-         * flash on drops and light rays on bass.
+         * flash on drops and light rays on bass. 6: 1.8 build-up before drops and tilt on
+         * beats.
          */
         const val LOOK_VERSION_KEY = "lookVersion"
         const val BEAT_EFFECTS_VERSION = 2
         const val GLOW_EFFECTS_VERSION = 3
         const val RIPPLE_EFFECTS_VERSION = 4
         const val DROP_EFFECTS_VERSION = 5
-        const val LOOK_VERSION = 5
+        const val BUILD_EFFECTS_VERSION = 6
+        const val LOOK_VERSION = 6
         val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
         val GLOW_EFFECT_SWITCHES = listOf("noteGlow", "sparkles")
         val RIPPLE_EFFECT_SWITCHES = listOf("hitRipple", "brightFringe")
         val DROP_EFFECT_SWITCHES = listOf("dropFlash", "lightRays")
+        val BUILD_EFFECT_SWITCHES = listOf("buildUp", "beatTilt")
 
         /** Empty JSON for a brand-new look, stamped with the current format version. */
         fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
@@ -608,6 +620,12 @@ class Settings(var json: JSONObject = newLook()) {
                 "dropFlashAmount" to 1.0,
                 "lightRays" to true,
                 "lightRaysAmount" to 1.0,
+                // 1.8 build-up before drops and tilt on beats: on for new looks and presets,
+                // off for looks stored before.
+                "buildUp" to true,
+                "buildUpAmount" to 1.0,
+                "beatTilt" to true,
+                "beatTiltAmount" to 1.0,
             )
     }
 }
