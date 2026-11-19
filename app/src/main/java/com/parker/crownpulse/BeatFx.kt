@@ -17,7 +17,8 @@ import kotlin.math.sqrt
  * first beat of each bar, the snare color split, the note color glow, the hi-hat
  * sparkles, the ripple on hits, the rainbow edge on bright sounds, the flash on drops,
  * the light rays on bass, the build-up before drops, the tilt on beats, the bounce on beats,
- * the orbit dots, the sound blob and the star warp). Everything is a function of music time,
+ * the orbit dots, the sound blob, the star warp and the sound wave line and ring).
+ * Everything is a function of music time,
  * so the preview and the export draw identical frames. No Android types and no allocation,
  * so the rules are covered by JVM tests and are safe to call every frame.
  */
@@ -175,6 +176,21 @@ object BeatFx {
 
     /** Fraction of a trip over which a new star fades in. */
     const val WARP_FADE_IN = .15f
+
+    /** Points along the sound wave line (waveform samples shown per frame). */
+    const val WAVE_POINTS = 128
+
+    /** Waveform samples shown on each half of the sound wave ring (the halves mirror). */
+    const val WAVE_RING_HALF = 64
+
+    /** Fraction of the wave line at each end that tapers to the rest line. */
+    const val WAVE_EDGE = .12f
+
+    /**
+     * Quietest frame peak that is still scaled up to full height; below it the wave just
+     * gets smaller, so near-silence stays a flat line instead of magnified hiss.
+     */
+    const val WAVE_MIN_PEAK = .12f
 
     /** Index of the last entry of sorted [times] at or before [t], or -1 when none is. */
     fun lastAtOrBefore(times: FloatArray, t: Float): Int {
@@ -623,5 +639,70 @@ object BeatFx {
         val fadeIn = (z / WARP_FADE_IN).coerceIn(0f, 1f)
         return (fadeIn * (.25f + .45f * energy.coerceIn(0f, 1.5f)) * amount.coerceIn(0f, 2f))
             .coerceIn(0f, 1f)
+    }
+
+    /**
+     * Start (0..count-span) of the [span] waveform samples to show from the [count] stored
+     * at [offset] in [data]: the first rising zero crossing, so a steady tone stands still
+     * on screen instead of sliding (an oscilloscope's edge trigger). 0 when there is none or
+     * the range is out of bounds. Edge-trigger idea from the MIT-licensed
+     * cat2151/cat-oscilloscope and alemidev/scope-tui; no code copied.
+     */
+    fun waveTrigger(data: FloatArray, offset: Int, count: Int, span: Int): Int {
+        val last = count - span
+        if (last < 1 || offset < 0 || offset + count > data.size) return 0
+        for (i in 1..last) if (data[offset + i - 1] < 0f && data[offset + i] >= 0f) return i
+        return 0
+    }
+
+    /** Largest absolute value of the [count] samples at [offset] in [data] (0 if none). */
+    fun wavePeak(data: FloatArray, offset: Int, count: Int): Float {
+        if (count < 1 || offset < 0 || offset + count > data.size) return 0f
+        var peak = 0f
+        for (i in 0 until count) {
+            val v = abs(data[offset + i])
+            if (v > peak) peak = v
+        }
+        return peak
+    }
+
+    /**
+     * Waveform sample [i] of the [count] at [offset] in [data], softened with its neighbors
+     * (1-2-1 weights) so the line is smooth instead of jagged. Indices past either end use
+     * the end sample. 0 when the range is out of bounds.
+     */
+    fun waveAt(data: FloatArray, offset: Int, count: Int, i: Int): Float {
+        if (count < 1 || offset < 0 || offset + count > data.size) return 0f
+        val j = i.coerceIn(0, count - 1)
+        val prev = data[offset + max(j - 1, 0)]
+        val next = data[offset + min(j + 1, count - 1)]
+        val v = .25f * prev + .5f * data[offset + j] + .25f * next
+        return if (v.isFinite()) v else 0f
+    }
+
+    /**
+     * Scale from a waveform sample to the wave's height (1 = full height) for a frame whose
+     * loudest sample is [peak], with [energy] (0..1.5) at [amount] (0..2). Each frame is
+     * scaled to its own peak so quiet mixes still move, and the energy keeps loud parts
+     * taller than quiet ones.
+     */
+    fun waveGain(peak: Float, energy: Float, amount: Float): Float {
+        val p = if (peak.isFinite()) max(peak, WAVE_MIN_PEAK) else WAVE_MIN_PEAK
+        return amount.coerceIn(0f, 2f) * (.35f + .65f * energy.coerceIn(0f, 1f)) / p
+    }
+
+    /** 0 at both ends of the wave line, 1 in the middle, with smooth [WAVE_EDGE] shoulders. */
+    fun waveTaper(u: Float): Float {
+        if (!(u > 0f) || u >= 1f) return 0f
+        val e = (min(u, 1f - u) / WAVE_EDGE).coerceIn(0f, 1f)
+        return e * e * (3f - 2f * e)
+    }
+
+    /** Waveform sample (0..[half]) at point [point] of a ring of 2 x [half] mirrored points. */
+    fun waveRingSample(point: Int, half: Int): Int {
+        if (half <= 0) return 0
+        val n = 2 * half
+        val j = ((point % n) + n) % n
+        return if (j <= half) j else n - j
     }
 }

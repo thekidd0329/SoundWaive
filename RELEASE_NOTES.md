@@ -1,5 +1,20 @@
 # SoundWaive release notes
 
+## 1.11.0 — Sound wave line and ring
+
+**What's new**
+- **A sound wave ring around your symbol.** The actual shape of your song's sound wraps around the crown as a glowing loop. It wiggles with every sound (vocals, synths, hi-hats, not just the beat) and gets thicker when the bass hits.
+- **A sound wave line across the screen.** The classic oscilloscope look: your song's sound wave as a glowing line running across the video behind the crown. Steady notes hold still instead of sliding around.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. The ring is on for new looks. The line is off unless you turn it on, or pick **Spectrum city** or **Ink storm**.
+- Tap **More options** to make either one taller or flatter.
+
+**Good to know**
+- Looks you saved before 1.11 open exactly as before, with both off.
+- These use sound data the app already had, so analysis is not any slower.
+- Minimal pulse skips both.
+
 ## 1.10.0 — Sound shape and star warp
 
 **What's new**

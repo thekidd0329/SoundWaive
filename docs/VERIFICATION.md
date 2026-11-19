@@ -1,5 +1,11 @@
 # Verification
 
+## 1.11.0 sound wave line and ring — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources, the engine's analysis layout (`engine/src/lib.rs`: 256 waveform samples per frame at offset `8 + BANDS`, spanning the 2048-sample window at 11025 Hz) and the Android API docs (`Path.moveTo`/`lineTo`/`close` into one reused path, `Canvas.drawPath` with stroke paints).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `waveTriggerFindsTheFirstRisingZeroCrossing`, `wavePeakAndSmoothing`, `waveGainScalesToThePeakAndTheEnergy`, `waveTaperAndMirroredRing`.
+- Not yet checked: everything on a phone, in particular whether the wave reads as music on dense mixes (the stored samples are every 8th sample, so very high sounds alias into fuzz), how the line sits with Spectrum city's bars, preview and export frame time, and that looks saved in 1.10 open with both off.
+
 ## 1.10.0 sound blob and star warp — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android API docs (`Path.quadTo` through outline midpoints for a smooth closed curve, `Canvas.drawPath` with fill and stroke paints, `Canvas.scale(sx, sy, px, py)` for the inner outline undone by `restoreToCount`, `Canvas.drawLine` for the stars).

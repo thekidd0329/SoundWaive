@@ -884,6 +884,8 @@ class MainActivity : Activity() {
         toggle("Dots that orbit on the beat", "beatOrbit")
         toggle("Shape that moves with the sound", "soundBlob")
         toggle("Star warp", "starWarp")
+        toggle("Sound wave line across the screen", "waveLine")
+        toggle("Sound wave ring around the symbol", "waveRing")
         addButtonRow(
             button(if (showBeatOptions) "Fewer options" else "More options") {
                 showBeatOptions = !showBeatOptions
@@ -906,6 +908,8 @@ class MainActivity : Activity() {
             slider("Orbit dot size", "beatOrbitAmount", 0f, 2f)
             slider("Sound shape strength", "soundBlobAmount", 0f, 2f)
             slider("Star warp strength", "starWarpAmount", 0f, 2f)
+            slider("Sound wave line height", "waveLineAmount", 0f, 2f)
+            slider("Sound wave ring height", "waveRingAmount", 0f, 2f)
         }
         panel.addView(
             text(
