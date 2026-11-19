@@ -41,6 +41,11 @@ class Analysis(
     val beatStrengths = FloatArray(beats.size) { beats[it].strength }
     val beatIsDownbeat = BooleanArray(beats.size) { beats[it].downbeat }
     val downbeatTimes = beats.filter { it.downbeat }.map { it.time }.toFloatArray()
+    /** Notes sorted by start time as primitive arrays, for the note color glow. */
+    private val notesByTime = notes.sortedBy { it.time }
+    val noteTimes = FloatArray(notes.size) { notesByTime[it].time }
+    val noteMidi = IntArray(notes.size) { notesByTime[it].midi }
+    val noteVelocity = FloatArray(notes.size) { notesByTime[it].velocity }
 
     init {
         var sum = 0f
@@ -140,10 +145,13 @@ class Settings(var json: JSONObject = newLook()) {
         // Keep their appearance: a missing effect switch there means off. New looks and
         // presets are written with the current version, so for them a missing switch still
         // falls back to DEFAULTS (on).
-        if (json.optInt(LOOK_VERSION_KEY, 1) < BEAT_EFFECTS_VERSION) {
+        // The same rule for the 1.5 glow effects: looks stored before 1.5 keep them off.
+        val stored = json.optInt(LOOK_VERSION_KEY, 1)
+        if (stored < BEAT_EFFECTS_VERSION)
             for (k in BEAT_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
-            json.put(LOOK_VERSION_KEY, LOOK_VERSION)
-        }
+        if (stored < GLOW_EFFECTS_VERSION)
+            for (k in GLOW_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+        if (stored < LOOK_VERSION) json.put(LOOK_VERSION_KEY, LOOK_VERSION)
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
             if (!json.has("backgroundType"))
@@ -196,6 +204,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "shockwaveAmount" to (0.0..2.0),
                 "punchAmount" to (0.0..2.0),
                 "colorSplitAmount" to (0.0..2.0),
+                "noteGlowAmount" to (0.0..2.0),
+                "sparkleAmount" to (0.0..2.0),
             )
         for ((k, r) in ranges) if (json.has(k)) {
             val v = json.optDouble(k, Double.NaN)
@@ -306,6 +316,9 @@ class Settings(var json: JSONObject = newLook()) {
                 set("trails", 12)
                 set("shake", .35)
                 set("background", "#171717")
+                // Black and white look: no colored glow, sparkles stay (they are white).
+                set("noteGlow", false)
+                set("sparkles", true)
             }
             "Cosmic bloom" -> {
                 set("palette", "Aurora")
@@ -347,6 +360,8 @@ class Settings(var json: JSONObject = newLook()) {
                 set("shockwaves", true)
                 set("downbeatPunch", true)
                 set("colorSplit", false)
+                set("noteGlow", false)
+                set("sparkles", false)
             }
             "Spectrum city" -> {
                 set("palette", "Sunset")
@@ -402,11 +417,16 @@ class Settings(var json: JSONObject = newLook()) {
     }
 
     companion object {
-        /** Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. */
+        /**
+         * Stored-look format. 1 (or missing): before 1.4. 2: 1.4 beat effects. 3: 1.5 note
+         * color glow and hi-hat sparkles.
+         */
         const val LOOK_VERSION_KEY = "lookVersion"
         const val BEAT_EFFECTS_VERSION = 2
-        const val LOOK_VERSION = 2
+        const val GLOW_EFFECTS_VERSION = 3
+        const val LOOK_VERSION = 3
         val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
+        val GLOW_EFFECT_SWITCHES = listOf("noteGlow", "sparkles")
 
         /** Empty JSON for a brand-new look, stamped with the current format version. */
         fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
@@ -531,6 +551,11 @@ class Settings(var json: JSONObject = newLook()) {
                 "punchAmount" to 1.0,
                 "colorSplit" to true,
                 "colorSplitAmount" to 1.0,
+                // 1.5 glow effects: on for new looks and presets, off for looks stored before.
+                "noteGlow" to true,
+                "noteGlowAmount" to 1.0,
+                "sparkles" to true,
+                "sparkleAmount" to 1.0,
             )
     }
 }

@@ -1,5 +1,21 @@
 # SoundWaive release notes
 
+## 1.5.0 — Color glow and sparkles
+
+**What's new**
+- **A glow that follows the music.** A soft glow sits behind the crown and slowly changes color with the notes in your song. When the chords change, the color drifts with them. The bass makes it brighter.
+- **Sparkles on hi-hats.** Tiny star glints pop around the crown on busy hi-hats and cymbals. Quiet parts stay clean.
+- **Slightly faster.** The vignette and film grain do less work every frame, which helps preview and export on the phone.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make the glow stronger or softer, or to get more or fewer sparkles.
+
+**Good to know**
+- Looks you saved before 1.5 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- The black and white looks (Ink storm, Minimal pulse) skip the colored glow.
+- Film grain specks are in slightly different spots than before; it looks the same overall.
+
 ## 1.4.1 — Saved looks stay as they were
 
 - Looks you saved before 1.4 now open exactly as you made them, with the beat effects off. Turn them on in Studio › **Beat effects** if you want them. New looks and presets still start with the effects on.

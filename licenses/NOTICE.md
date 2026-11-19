@@ -24,3 +24,5 @@ Rust dependency lockfile includes the following packages. Platform-specific or b
 - walkdir 2.5.0: Unlicense/MIT
 
 The crown and demo music were provided by the user for this private build.
+
+Ideas and algorithms used without copying code: the circle-of-fifths key colors follow dedo1911/music-visualizer (MIT); `BeatFx.hash01` is the "lowbias32" integer hash by Chris Wellons (public domain).

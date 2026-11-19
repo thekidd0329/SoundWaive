@@ -1,5 +1,24 @@
 # Changes
 
+## [1.5.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Glow that changes color with the notes:** a soft glow behind the symbol. Each detected note sits on the circle of fifths (C red, G orange, D yellow, ... 30 degrees per fifth), the notes of the last 1.2 s are blended as velocity-weighted vectors with a cubic fade, and the result sets the hue. Notes that agree give a deep color, clashing ones a paler one; bass sets brightness and size. Without detected notes it uses the palette's main color. Key-color idea from the MIT-licensed dedo1911/music-visualizer; no code copied.
+  - **Sparkles on hi-hats:** small four-point glints around the symbol when the hi-hat level passes 0.35, up to 7 at the default amount (14 at most). Positions come from a hash of music time, so preview and export match.
+  - **More options** adds **Glow strength** and **Sparkle amount** (0 turns them off).
+- `BeatFx`: `fifthsHue`, `noteColor`, `glowAlpha`, `sparkleCount` and `hash01` (lowbias32 integer hash, public domain), with JVM tests.
+- `Analysis.noteTimes`, `noteMidi`, `noteVelocity`: notes sorted by time as primitive arrays.
+
+### Changed
+- Stored looks are now `lookVersion` 3. A look stored before 1.5 (version 1 or 2) loads with the two new switches off, so it looks the same as before; 1.4 rules for older looks are unchanged.
+- **Ink storm** keeps sparkles but turns the colored glow off (black and white look). **Minimal pulse** turns both off.
+
+### Performance
+- The vignette gradient is built once and reused until its strength or the frame height changes, instead of a new `RadialGradient` every frame.
+- Film grain uses the hash instead of a new `java.util.Random` every frame, and the paper texture reuses one `RectF`. Grain specks land in different (still repeatable) places than in 1.4.
+- The glow is one 128 px alpha mask made at start-up and tinted by the paint color, so it adds no bitmap, shader or filter per frame.
+
 ## [1.4.1] - 2026-11-18
 
 ### Fixed

@@ -36,6 +36,33 @@ class VisualRenderer(context: Context) {
     private val beatDown = BooleanArray(2)
     /** Seconds since the latest (0) and previous (1) bar line; -1 when there is none. */
     private val barAge = FloatArray(2)
+    // Note color glow: a soft white disc kept as an alpha mask (ALPHA_8), so drawing it takes
+    // its color from the paint and any hue costs no new bitmap, shader or filter per frame.
+    private val halo: Bitmap = run {
+        val size = 128
+        val disc = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader =
+            RadialGradient(
+                size / 2f,
+                size / 2f,
+                size / 2f,
+                intArrayOf(Color.WHITE, Color.argb(120, 255, 255, 255), Color.TRANSPARENT),
+                floatArrayOf(0f, .42f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        Canvas(disc).drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        disc.extractAlpha().also { disc.recycle() }
+    }
+    private val haloRect = RectF()
+    /** Hue, agreement and presence of the recent notes (see [BeatFx.noteColor]). */
+    private val glowNote = FloatArray(3)
+    private val glowHsv = FloatArray(3)
+    private val screenRect = RectF()
+    // The vignette only changes when its strength or the frame height does, so keep it.
+    private var vignetteShader: Shader? = null
+    private var vignetteKey = Float.NaN
+    private var vignetteHeight = Float.NaN
     private val path = Path()
     private var h = 1920f
     private val tau = (Math.PI * 2).toFloat()
@@ -218,6 +245,81 @@ class VisualRenderer(context: Context) {
         }
     }
 
+    /**
+     * A soft glow behind the symbol whose color follows the notes: each note's place on the
+     * circle of fifths sets the hue, so a key or chord change slowly turns the glow. Clear
+     * chords give a deep color, busy passages a paler one, and the bass makes it brighter
+     * and bigger. Without detected notes it glows in the palette's main color.
+     */
+    private fun noteGlow(
+        c: Canvas,
+        t: Float,
+        a: Analysis,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        bass: Float,
+        amount: Float,
+        fallback: Int,
+    ) {
+        val alpha = BeatFx.glowAlpha(bass, amount)
+        if (alpha < .01f) return
+        BeatFx.noteColor(a.noteTimes, a.noteMidi, a.noteVelocity, t, glowNote)
+        val presence = glowNote[2]
+        val color =
+            if (presence < .05f) fallback
+            else {
+                glowHsv[0] = glowNote[0]
+                glowHsv[1] = (.3f + .6f * glowNote[1]) * min(1f, presence * 2f)
+                glowHsv[2] = 1f
+                Color.HSVToColor(glowHsv)
+            }
+        val r = size * (.62f + .2f * bass.coerceIn(0f, 1f))
+        haloRect.set(cx - r, cy - r * 1.12f, cx + r, cy + r * 1.12f)
+        ink(color, alpha, fill = true)
+        c.drawBitmap(halo, null, haloRect, p)
+    }
+
+    /**
+     * Small four-point glints around the symbol on hi-hat hits. Places come from a hash of
+     * the music time (a new set 15 times a second), so preview and export match; each set
+     * fades a little before the next one replaces it.
+     */
+    private fun sparkles(
+        c: Canvas,
+        t: Float,
+        s: Settings,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        hat: Float,
+        amount: Float,
+        accent: Int,
+    ) {
+        val count = BeatFx.sparkleCount(hat, amount)
+        if (count == 0) return
+        val clock = t * 15f
+        val slot = clock.toInt()
+        val fade = 1f - .6f * (clock - slot)
+        val strength = ((hat - BeatFx.SPARKLE_THRESHOLD) / (1f - BeatFx.SPARKLE_THRESHOLD))
+            .coerceIn(0f, 1f)
+        for (j in 0 until count) {
+            val n = slot * 7919 + j * 131 + s.i("seed") * 17
+            val angle = BeatFx.hash01(n) * tau
+            val rad = size * (.34f + .5f * BeatFx.hash01(n + 1))
+            val x = cx + cos(angle) * rad
+            val y = cy + sin(angle) * rad * 1.15f
+            val len = (9f + 20f * BeatFx.hash01(n + 2)) * (.6f + .4f * strength)
+            val alpha = (.5f + .5f * BeatFx.hash01(n + 3)) * fade * min(1f, .4f + strength)
+            val col = if (j % 3 == 0) accent else white
+            line(c, x - len, y, x + len, y, col, 2f, alpha)
+            line(c, x, y - len, x, y + len, col, 2f, alpha)
+            val d = len * .35f
+            line(c, x - d, y - d, x + d, y + d, col, 1.2f, alpha * .6f)
+            line(c, x - d, y + d, x + d, y - d, col, 1.2f, alpha * .6f)
+        }
+    }
+
     fun draw(
         c: Canvas,
         width: Int,
@@ -269,7 +371,8 @@ class VisualRenderer(context: Context) {
             background?.frame(time)?.let { drawBackground(c, it, s, bass, kick) }
         if (s.f("grain") > 0) {
             ink(white, s.f("grain") * .09f, fill = true)
-            c.drawBitmap(paper, null, RectF(0f, 0f, 1080f, h), p)
+            screenRect.set(0f, 0f, 1080f, h)
+            c.drawBitmap(paper, null, screenRect, p)
         }
         var cx =
             540 +
@@ -379,6 +482,8 @@ class VisualRenderer(context: Context) {
                 .16f + .25f * (1 - q),
             )
         }
+        if (s.b("noteGlow") && s.f("noteGlowAmount") > 0f)
+            noteGlow(c, t, a, cx, cy, size, bass, s.f("noteGlowAmount"), primary)
         if (s.b("colorSplit")) {
             // Snare hits split the symbol into red and cyan copies behind it (RGB split).
             val offset = BeatFx.splitOffset(snare, s.f("colorSplitAmount"))
@@ -391,6 +496,7 @@ class VisualRenderer(context: Context) {
         stamp(c, s, t, size, cx, cy, angle, s.f("opacity"))
         if (s.b("shockwaves") && s.f("shockwaveAmount") > 0f)
             shockwaves(c, cx, cy, size, s.f("shockwaveAmount"), secondary, tertiary)
+        if (s.b("sparkles")) sparkles(c, t, s, cx, cy, size, hat, s.f("sparkleAmount"), tertiary)
         if (kick > .16f && s.i("rings") > 0) {
             val age = -.15f * ln(max(kick, .001f))
             for (j in 0..2) {
@@ -433,28 +539,36 @@ class VisualRenderer(context: Context) {
         }
         c.restoreToCount(punchSave)
         if (s.f("grain") > 0) {
-            val rng = Random((frame / 2 + 813 + s.i("seed")).toLong())
+            // Hashed positions instead of a new Random every frame; same result in preview
+            // and export.
+            val base = (frame / 2 + 813 + s.i("seed")) * 977
             repeat((120 * detail).toInt()) {
-                val x = rng.nextFloat() * 1080
-                val y = rng.nextFloat() * h
-                val v = 1 + rng.nextFloat() * 2
+                val n = base + it * 3
+                val x = BeatFx.hash01(n) * 1080
+                val y = BeatFx.hash01(n + 1) * h
+                val v = 1 + BeatFx.hash01(n + 2) * 2
                 rect(c, x, y, v, v, white, (.09f + .13f * high) * s.f("grain") * 2)
             }
         }
         if (s.f("vignette") > 0) {
             ink(Color.BLACK, fill = true)
-            p.shader =
-                RadialGradient(
-                    540f,
-                    h * .5f,
-                    max(700f, h * .68f),
-                    intArrayOf(
-                        Color.TRANSPARENT,
-                        Color.argb((s.f("vignette") * 200).toInt(), 0, 0, 0),
-                    ),
-                    null,
-                    Shader.TileMode.CLAMP,
-                )
+            if (vignetteShader == null || vignetteKey != s.f("vignette") || vignetteHeight != h) {
+                vignetteKey = s.f("vignette")
+                vignetteHeight = h
+                vignetteShader =
+                    RadialGradient(
+                        540f,
+                        h * .5f,
+                        max(700f, h * .68f),
+                        intArrayOf(
+                            Color.TRANSPARENT,
+                            Color.argb((vignetteKey * 200).toInt(), 0, 0, 0),
+                        ),
+                        null,
+                        Shader.TileMode.CLAMP,
+                    )
+            }
+            p.shader = vignetteShader
             c.drawRect(0f, 0f, 1080f, h, p)
             p.shader = null
         }

@@ -1,5 +1,11 @@
 # Verification
 
+## 1.5.0 note color glow and hi-hat sparkles — November 18, 2026
+
+- Nothing was compiled, tested or rendered on the build box; the change was checked by reading it against the existing sources and the Android/Kotlin API docs (`Bitmap.extractAlpha` masks are drawn in the paint's color; `Color.HSVToColor`).
+- New JVM tests to run (`./gradlew :app:testDebugUnitTest`): in `BeatFxTest`, `fifthsHueWalksTheCircleOfFifths`, `noteColorBlendsRecentNotes`, `glowIsBoundedAndFollowsBass`, `sparklesOnlyOnLoudHats`, `hashIsRepeatableAndInRange`; in `AnalysisFormatTest.legacyFileWithoutBeatGridStillLoads`, the note arrays.
+- Not yet checked: everything on a phone, in particular how the glow color reads on real songs, frame time with all five effects on, and that looks saved in 1.4 open with the glow and sparkles off.
+
 ## 1.4.1 saved-look compatibility — November 18, 2026
 
 - Nothing was compiled, tested or rendered on the build box; the change was checked by reading it. `Settings` uses `android.graphics.Color` and `org.json`, which the JVM unit tests do not load, so the look upgrade has no unit test; check it on a phone.
