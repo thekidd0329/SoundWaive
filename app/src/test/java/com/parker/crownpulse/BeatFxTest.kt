@@ -358,4 +358,56 @@ class BeatFxTest {
         assertEquals(.7f, BeatFx.warpAlpha(.5f, 1f, 1f), eps)
         assertEquals(0f, BeatFx.warpAlpha(.5f, 1f, 0f), eps)
     }
+
+    @Test
+    fun waveTriggerFindsTheFirstRisingZeroCrossing() {
+        // Two stored values before the window, then a falling and a rising crossing.
+        val d = floatArrayOf(9f, 9f, .5f, -.2f, -.4f, .3f, .6f, -.1f, .2f, .4f)
+        assertEquals(3, BeatFx.waveTrigger(d, 2, 8, 4))
+        // The window must still fit after the crossing: none in range gives 0.
+        assertEquals(0, BeatFx.waveTrigger(d, 2, 8, 6))
+        assertEquals(0, BeatFx.waveTrigger(floatArrayOf(.1f, .2f, .3f, .4f), 0, 4, 2))
+        assertEquals(0, BeatFx.waveTrigger(d, 5, 8, 2))
+    }
+
+    @Test
+    fun wavePeakAndSmoothing() {
+        val d = floatArrayOf(.2f, -.8f, .4f, Float.NaN)
+        assertEquals(.8f, BeatFx.wavePeak(d, 0, 3), eps)
+        assertEquals(.8f, BeatFx.wavePeak(d, 0, 4), eps)
+        assertEquals(0f, BeatFx.wavePeak(d, 2, 4), eps)
+        // 1-2-1 weights; the ends reuse the end sample.
+        assertEquals(.25f * .2f + .5f * -.8f + .25f * .4f, BeatFx.waveAt(d, 0, 3, 1), eps)
+        assertEquals(.75f * .2f + .25f * -.8f, BeatFx.waveAt(d, 0, 3, 0), eps)
+        assertEquals(BeatFx.waveAt(d, 0, 3, 2), BeatFx.waveAt(d, 0, 3, 99), eps)
+        assertEquals(0f, BeatFx.waveAt(d, 0, 4, 3), eps)
+    }
+
+    @Test
+    fun waveGainScalesToThePeakAndTheEnergy() {
+        // A full-energy frame reaches full height at its peak.
+        assertEquals(1f, .5f * BeatFx.waveGain(.5f, 1f, 1f), eps)
+        // Quiet frames are not magnified past the floor peak.
+        assertEquals(1f / BeatFx.WAVE_MIN_PEAK, BeatFx.waveGain(.01f, 1f, 1f), eps)
+        assertTrue(BeatFx.waveGain(.5f, .2f, 1f) < BeatFx.waveGain(.5f, 1f, 1f))
+        assertEquals(0f, BeatFx.waveGain(.5f, 1f, 0f), eps)
+        assertEquals(1f / BeatFx.WAVE_MIN_PEAK, BeatFx.waveGain(Float.NaN, 1f, 1f), eps)
+    }
+
+    @Test
+    fun waveTaperAndMirroredRing() {
+        assertEquals(0f, BeatFx.waveTaper(0f), eps)
+        assertEquals(0f, BeatFx.waveTaper(1f), eps)
+        assertEquals(0f, BeatFx.waveTaper(Float.NaN), eps)
+        assertEquals(1f, BeatFx.waveTaper(.5f), eps)
+        assertEquals(1f, BeatFx.waveTaper(BeatFx.WAVE_EDGE), eps)
+        assertEquals(.5f, BeatFx.waveTaper(BeatFx.WAVE_EDGE / 2), eps)
+        val half = BeatFx.WAVE_RING_HALF
+        assertEquals(0, BeatFx.waveRingSample(0, half))
+        assertEquals(half, BeatFx.waveRingSample(half, half))
+        assertEquals(1, BeatFx.waveRingSample(2 * half - 1, half))
+        assertEquals(0, BeatFx.waveRingSample(2 * half, half))
+        for (j in 1 until half)
+            assertEquals(BeatFx.waveRingSample(j, half), BeatFx.waveRingSample(2 * half - j, half))
+    }
 }

@@ -77,6 +77,8 @@ class VisualRenderer(context: Context) {
     private val blobX = FloatArray(BeatFx.BLOB_POINTS)
     private val blobY = FloatArray(BeatFx.BLOB_POINTS)
     private val blobPath = Path()
+    // Sound wave line and ring: one reusable path for both.
+    private val wavePath = Path()
     // The vignette only changes when its strength or the frame height does, so keep it.
     private var vignetteShader: Shader? = null
     private var vignetteKey = Float.NaN
@@ -458,6 +460,89 @@ class VisualRenderer(context: Context) {
     }
 
     /**
+     * Sound wave line: the song's actual waveform (the 256 samples the engine stores for
+     * every analysis frame, about 186 ms of sound) drawn as a glowing line across the frame
+     * through the symbol, like an oscilloscope. It starts on a rising zero crossing so steady
+     * notes stand still (see [BeatFx.waveTrigger]), is scaled to the frame's peak and the
+     * energy, tapers to the rest line at both ends and thickens with the bass. One reused
+     * path, two draws, no allocation.
+     */
+    private fun waveLine(
+        c: Canvas,
+        a: Analysis,
+        index: Int,
+        y: Float,
+        energy: Float,
+        bass: Float,
+        amount: Float,
+        color: Int,
+        accent: Int,
+    ) {
+        val off = index * a.stride + 8 + a.bands
+        val n = BeatFx.WAVE_POINTS
+        val start = BeatFx.waveTrigger(a.data, off, a.waves, n)
+        val gain = BeatFx.waveGain(BeatFx.wavePeak(a.data, off, a.waves), energy, amount)
+        val height = 150f
+        wavePath.reset()
+        for (j in 0 until n) {
+            val u = j / (n - 1f)
+            val v = BeatFx.waveAt(a.data, off, a.waves, start + j) * gain * BeatFx.waveTaper(u)
+            val x = 30f + u * 1020f
+            val py = y - v * height
+            if (j == 0) wavePath.moveTo(x, py) else wavePath.lineTo(x, py)
+        }
+        val lift = bass.coerceIn(0f, 1f)
+        ink(accent, .16f + .14f * lift, 10f + 8f * lift)
+        c.drawPath(wavePath, p)
+        ink(color, .85f, 2.5f + 2.5f * lift)
+        c.drawPath(wavePath, p)
+    }
+
+    /**
+     * Sound wave ring: the same waveform wrapped around the symbol, the left and right halves
+     * mirrored so the loop closes without a seam (sample 0 at the bottom, the last one at the
+     * top). It moves with every sound, not only the beat, and thickens with the bass. One
+     * reused path, two draws, no allocation.
+     */
+    private fun waveRing(
+        c: Canvas,
+        a: Analysis,
+        index: Int,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        energy: Float,
+        bass: Float,
+        amount: Float,
+        color: Int,
+        accent: Int,
+    ) {
+        val off = index * a.stride + 8 + a.bands
+        val half = BeatFx.WAVE_RING_HALF
+        val n = 2 * half
+        val start = BeatFx.waveTrigger(a.data, off, a.waves, half + 1)
+        val gain = BeatFx.waveGain(BeatFx.wavePeak(a.data, off, a.waves), energy, amount)
+        val base = size * .64f
+        val reach = size * .14f
+        wavePath.reset()
+        for (j in 0 until n) {
+            val v = BeatFx.waveAt(a.data, off, a.waves, start + BeatFx.waveRingSample(j, half))
+            val r = base + v * gain * reach
+            // Point 0 at the bottom (angle a quarter turn, y grows downward).
+            val angle = j * tau / n + tau / 4
+            val x = cx + cos(angle) * r
+            val y = cy + sin(angle) * r * 1.1f
+            if (j == 0) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
+        }
+        wavePath.close()
+        val lift = bass.coerceIn(0f, 1f)
+        ink(accent, .14f + .14f * lift, 9f + 7f * lift)
+        c.drawPath(wavePath, p)
+        ink(color, .75f, 2f + 2f * lift)
+        c.drawPath(wavePath, p)
+    }
+
+    /**
      * Star warp: streaks fly out from behind the symbol toward the edges, faster in loud, busy
      * parts and surging on kicks, like flying through stars. Every star's place is a function
      * of the music flow (see [BeatFx.warpTravel]) and a hash, so preview and export match;
@@ -706,6 +791,8 @@ class VisualRenderer(context: Context) {
             }
         }
         if (s.b("bars")) bars(c, t, a, s, pal, energy)
+        if (s.b("waveLine") && s.f("waveLineAmount") > 0f)
+            waveLine(c, a, index, cy, energy, bass, s.f("waveLineAmount"), white, secondary)
         if (s.s("style") == "Bloom") bloom(c, t, a, s, flow, cx, cy, pal, energy)
         val count = s.i("echoes").coerceIn(0, 10)
         for (j in 0 until count) {
@@ -753,6 +840,20 @@ class VisualRenderer(context: Context) {
             noteGlow(c, t, a, cx, cy, size, bass, s.f("noteGlowAmount"), primary)
         if (s.b("soundBlob") && s.f("soundBlobAmount") > 0f)
             soundBlob(c, t, a, cx, cy, size, bass, s.f("soundBlobAmount"), secondary, tertiary)
+        if (s.b("waveRing") && s.f("waveRingAmount") > 0f)
+            waveRing(
+                c,
+                a,
+                index,
+                cx,
+                cy,
+                size,
+                energy,
+                bass,
+                s.f("waveRingAmount"),
+                primary,
+                tertiary,
+            )
         val bounceSave = c.save()
         if (s.b("beatBounce")) {
             // Bounce on beats: the symbol squashes on each beat, rebounds and settles, and
