@@ -25,6 +25,14 @@ class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
     /** Opens/closes background media off the UI thread, independent of analysis/export. */
     private val mediaWorker = Executors.newSingleThreadExecutor()
+    /** Runs the AI background sharpening off the UI thread. */
+    private val aiWorker = Executors.newSingleThreadExecutor()
+    /** Sharpened copy of the background photo (null = none, or nothing to gain). */
+    private var aiPhoto: Bitmap? = null
+    /** The background photo that [aiPhoto] was made (or is being made) from. */
+    private var aiPhotoFor: Bitmap? = null
+    /** Chip that made [aiPhoto]: "TPU", "GPU" or "CPU". */
+    private var aiPhotoChip: String? = null
     private var mediaSignature = ""
     private var showBackgroundOptions = false
     private var showBeatOptions = false
@@ -189,9 +197,11 @@ class MainActivity : Activity() {
      */
     private fun refreshBackground() {
         val type = settings.s("backgroundType")
+        if (type == BackgroundMath.PHOTO && settings.b("aiEnhance")) enhancePhoto()
         val signature =
             when (type) {
-                BackgroundMath.PHOTO -> "$type|${System.identityHashCode(renderer.backdrop)}"
+                BackgroundMath.PHOTO ->
+                    "$type|${System.identityHashCode(backgroundPhoto(settings))}"
                 BackgroundMath.GIF,
                 BackgroundMath.VIDEO ->
                     "$type|${settings.s("backgroundUri")}|${settings.s("backgroundEnd")}"
@@ -202,7 +212,7 @@ class MainActivity : Activity() {
         val old = renderer.background
         renderer.background = null
         val snapshot = settings.copy()
-        val photo = renderer.backdrop
+        val photo = backgroundPhoto(snapshot)
         mediaWorker.submit {
             old?.release()
             val opened =
@@ -238,6 +248,68 @@ class MainActivity : Activity() {
                     }
             }
         }
+    }
+
+    /** The photo to show behind everything: the AI-sharpened copy when it is on and ready. */
+    private fun backgroundPhoto(s: Settings): Bitmap? {
+        val photo = renderer.backdrop
+        return if (s.b("aiEnhance") && photo != null && aiPhotoFor === photo) aiPhoto ?: photo
+        else photo
+    }
+
+    /**
+     * Sharpens and cleans up the background photo once (at import, or when the switch is
+     * turned on) and keeps the result in filesDir, so it is never redone. Any failure leaves
+     * the original photo, with a log line.
+     */
+    private fun enhancePhoto() {
+        val source = renderer.backdrop ?: return
+        if (aiPhotoFor === source) return
+        aiPhotoFor = source
+        aiPhoto = null
+        aiPhotoChip = null
+        val app = applicationContext
+        aiWorker.submit {
+            var result: Bitmap? = null
+            var chip: String? = null
+            try {
+                val ai = AiUpscaler.get(app)
+                if (ai != null) {
+                    result = ai.enhance(source, AI_PHOTO_SHORT_SIDE)
+                    chip = ai.chip
+                    val image = result
+                    if (image != null)
+                        File(filesDir, AI_PHOTO_FILE).outputStream().use {
+                            image.compress(Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                    // "none" means the photo was already sharp enough: don't try again.
+                    File(filesDir, AI_PHOTO_INFO).writeText(if (image != null) ai.chip else "none")
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("SoundWaive", "AI photo sharpening skipped", e)
+                result = null
+            }
+            val done = result
+            val usedChip = chip
+            runOnUiThread {
+                if (!closing && renderer.backdrop === source && aiPhotoFor === source) {
+                    aiPhoto = done
+                    aiPhotoChip = usedChip
+                    if (done != null) {
+                        refreshBackground()
+                        preview.invalidate()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun forgetAiPhoto() {
+        aiPhoto = null
+        aiPhotoFor = null
+        aiPhotoChip = null
+        File(filesDir, AI_PHOTO_FILE).delete()
+        File(filesDir, AI_PHOTO_INFO).delete()
     }
 
     private fun pickBackground(type: String) {
@@ -957,6 +1029,8 @@ class MainActivity : Activity() {
             addButtonRow(button("Choose a different ${type.lowercase()}") { pickBackground(type) })
             slider("Dim", "backgroundDim", 0f, 1f)
             toggle("Pulse with the beat", "backgroundPulse")
+            if (type == BackgroundMath.PHOTO || type == BackgroundMath.VIDEO)
+                toggle("Sharpen & clean up background (AI)", "aiEnhance")
             addButtonRow(
                 button(if (showBackgroundOptions) "Fewer options" else "More options") {
                     showBackgroundOptions = !showBackgroundOptions
@@ -1122,13 +1196,22 @@ class MainActivity : Activity() {
                 engine.artwork = renderer.artwork
                 engine.backdrop = renderer.backdrop
                 val (outW, outH) = VideoExporter().dimensions(snapshot)
+                val photo = backgroundPhoto(snapshot)
+                var aiChip: String? =
+                    if (
+                        snapshot.s("backgroundType") == BackgroundMath.PHOTO &&
+                            photo != null &&
+                            photo === aiPhoto
+                    )
+                        aiPhotoChip
+                    else null
                 exportBackground =
                     try {
                         // A private instance decodes in order, exactly by export time.
                         BackgroundMedia.open(
                             this,
                             snapshot,
-                            renderer.backdrop,
+                            photo,
                             BackgroundMedia.PREVIEW_SHORT_SIDE,
                             BackgroundMath.Size(outW, outH),
                         )
@@ -1138,6 +1221,44 @@ class MainActivity : Activity() {
                         }
                         null
                     }
+                var aiVideo: AiVideoBackground? = null
+                val opened = exportBackground
+                if (opened is VideoBackground && snapshot.b("aiEnhance")) {
+                    // Video frames are sharpened up to the export's background size.
+                    val target =
+                        min(
+                            min(outW, outH),
+                            BackgroundMath.qualityShortSide(snapshot.s("renderQuality"))
+                                ?: Int.MAX_VALUE,
+                        )
+                    if (min(opened.size.width, opened.size.height) < target) {
+                        progress("Getting the AI sharpening ready", .09f)
+                        val ai =
+                            try {
+                                AiUpscaler.get(this)
+                            } catch (e: Throwable) {
+                                android.util.Log.w("SoundWaive", "AI sharpening skipped", e)
+                                null
+                            }
+                        if (ai != null) {
+                            val wrapped =
+                                AiVideoBackground(
+                                    opened,
+                                    ai,
+                                    target,
+                                    AiVideoBackground.cacheFor(
+                                        cacheDir,
+                                        snapshot.s("backgroundUri"),
+                                        target,
+                                        opened.size,
+                                    ),
+                                )
+                            aiVideo = wrapped
+                            aiChip = ai.chip
+                            exportBackground = wrapped
+                        }
+                    }
+                }
                 engine.background = exportBackground
                 val result =
                     VideoExporter().export(
@@ -1154,6 +1275,8 @@ class MainActivity : Activity() {
                     result.file.inputStream().use { it.copyTo(out) }
                 }
                 result.file.delete()
+                val usedAi = aiChip != null && (aiVideo == null || aiVideo.improved > 0)
+                val aiLine = if (usedAi) "Background sharpened by AI on the $aiChip." else null
                 runOnUiThread {
                     lastUri = uri
                     endBusy()
@@ -1162,6 +1285,7 @@ class MainActivity : Activity() {
                         .setTitle("Your video is ready")
                         .setMessage(
                             "${result.width} × ${result.height} · ${formatTime(result.duration)} · full audio" +
+                                (aiLine?.let { "\n\n$it" } ?: "") +
                                 (result.notice?.let { "\n\n$it" } ?: "")
                         )
                         .setPositiveButton("Play") { _, _ -> openExport() }
@@ -1255,6 +1379,20 @@ class MainActivity : Activity() {
                 if (name == "artwork") renderer.artwork = bitmap else renderer.backdrop = bitmap
             }
         }
+        // The sharpened background photo from an earlier run, if any.
+        val photo = renderer.backdrop
+        val info = File(filesDir, AI_PHOTO_INFO)
+        if (photo != null && info.isFile) {
+            val chip = info.readText().trim()
+            val sharp =
+                if (chip == "none") null
+                else BitmapFactory.decodeFile(File(filesDir, AI_PHOTO_FILE).absolutePath)
+            if (chip == "none" || sharp != null) {
+                aiPhotoFor = photo
+                aiPhoto = sharp
+                aiPhotoChip = if (sharp != null) chip else null
+            }
+        }
     }
 
     private fun readImage(uri: Uri, background: Boolean) {
@@ -1274,6 +1412,7 @@ class MainActivity : Activity() {
             val file = File(filesDir, if (background) "background.png" else "artwork.png")
             file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             if (background) {
+                forgetAiPhoto()
                 renderer.backdrop = image
                 settings.set("backgroundType", BackgroundMath.PHOTO)
             } else {
@@ -1427,6 +1566,7 @@ class MainActivity : Activity() {
             mediaWorker.submit { old?.release() }
         }
         mediaWorker.shutdown()
+        aiWorker.shutdown()
         super.onDestroy()
     }
 
@@ -1458,5 +1598,12 @@ class MainActivity : Activity() {
             renderer.draw(canvas, w, h, displayTime, t.analysis, settings)
             canvas.restore()
         }
+    }
+
+    private companion object {
+        /** The AI sharpens background photos for frames up to 1080 pixels on the short side. */
+        const val AI_PHOTO_SHORT_SIDE = 1080
+        const val AI_PHOTO_FILE = "background-ai.png"
+        const val AI_PHOTO_INFO = "background-ai.txt"
     }
 }

@@ -182,6 +182,9 @@ class Settings(var json: JSONObject = newLook()) {
             for (k in WARP_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < WAVE_EFFECTS_VERSION)
             for (k in WAVE_EFFECT_SWITCHES) if (!json.has(k)) json.put(k, false)
+        // 1.13 AI background sharpening: looks stored before it keep their exact background.
+        if (stored < AI_VERSION)
+            for (k in AI_SWITCHES) if (!json.has(k)) json.put(k, false)
         if (stored < LOOK_VERSION) json.put(LOOK_VERSION_KEY, LOOK_VERSION)
         // 1.0/1.1 looks stored an on/off photo switch; 1.2 stores the background kind.
         if (json.has("backgroundImage")) {
@@ -335,6 +338,7 @@ class Settings(var json: JSONObject = newLook()) {
                 "backgroundFit",
                 "backgroundEnd",
                 "backgroundPulse",
+                "aiEnhance",
             )
         val retained = sessionKeys.filter { json.has(it) }.associateWith { json.get(it) }
         json = newLook()
@@ -495,7 +499,7 @@ class Settings(var json: JSONObject = newLook()) {
          * color glow and hi-hat sparkles. 4: 1.6 ripple on hits and rainbow edge. 5: 1.7
          * flash on drops and light rays on bass. 6: 1.8 build-up before drops and tilt on
          * beats. 7: 1.9 bounce on beats and orbit dots. 8: 1.10 sound blob and star warp.
-         * 9: 1.11 sound wave line and ring.
+         * 9: 1.11 sound wave line and ring. 10: 1.13 AI background sharpening.
          */
         const val LOOK_VERSION_KEY = "lookVersion"
         const val BEAT_EFFECTS_VERSION = 2
@@ -506,7 +510,8 @@ class Settings(var json: JSONObject = newLook()) {
         const val BOUNCE_EFFECTS_VERSION = 7
         const val WARP_EFFECTS_VERSION = 8
         const val WAVE_EFFECTS_VERSION = 9
-        const val LOOK_VERSION = 9
+        const val AI_VERSION = 10
+        const val LOOK_VERSION = 10
         val BEAT_EFFECT_SWITCHES = listOf("shockwaves", "downbeatPunch", "colorSplit")
         val GLOW_EFFECT_SWITCHES = listOf("noteGlow", "sparkles")
         val RIPPLE_EFFECT_SWITCHES = listOf("hitRipple", "brightFringe")
@@ -515,6 +520,7 @@ class Settings(var json: JSONObject = newLook()) {
         val BOUNCE_EFFECT_SWITCHES = listOf("beatBounce", "beatOrbit")
         val WARP_EFFECT_SWITCHES = listOf("soundBlob", "starWarp")
         val WAVE_EFFECT_SWITCHES = listOf("waveLine", "waveRing")
+        val AI_SWITCHES = listOf("aiEnhance")
 
         /** Empty JSON for a brand-new look, stamped with the current format version. */
         fun newLook(): JSONObject = JSONObject().put(LOOK_VERSION_KEY, LOOK_VERSION)
@@ -576,6 +582,9 @@ class Settings(var json: JSONObject = newLook()) {
                 "backgroundFit" to BackgroundMath.FILL,
                 "backgroundEnd" to BackgroundMath.LOOP,
                 "backgroundPulse" to true,
+                // 1.13: sharpen and clean up photo and video backgrounds with the AI model.
+                // On for new looks; off for looks stored before.
+                "aiEnhance" to true,
                 "renderQuality" to BackgroundMath.BALANCED,
                 "backgroundDim" to .65,
                 "scale" to 1.0,

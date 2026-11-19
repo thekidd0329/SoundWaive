@@ -146,6 +146,10 @@ private constructor(
     lateinit var size: BackgroundMath.Size
         private set
 
+    /** Media time in microseconds of the frame [frame] last returned (NONE before any). */
+    val shownUs: Long
+        get() = shownPts
+
     private val info = MediaCodec.BufferInfo()
     private var inputDone = false
     private var outputDone = false
