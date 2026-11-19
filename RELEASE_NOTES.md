@@ -1,5 +1,20 @@
 # SoundWaive release notes
 
+## 1.9.0 — Bounce and orbit dots
+
+**What's new**
+- **Bounce on beats.** The crown squashes down on every beat, springs back up and settles, like it's landing on the beat. Right before the next beat it stretches up a little, so each hit lands with a snap.
+- **Dots that orbit on the beat.** Four little dots circle the crown and jump forward on every beat, so you can see the beat even with the sound off. They go all the way around every two bars and get bigger on the first beat of each bar.
+
+**Where to find it**
+- Studio › **Beat effects**: one switch for each. They are on for new looks and presets.
+- Tap **More options** to make the bounce stronger or softer, or the dots bigger or smaller.
+
+**Good to know**
+- Looks you saved before 1.9 open exactly as before, with these two effects off. Turn them on in **Beat effects** if you want them.
+- Only the crown bounces; the rings, rays, background and titles stay put.
+- Minimal pulse skips both new effects.
+
 ## 1.8.0 — Build-up and beat tilt
 
 **What's new**

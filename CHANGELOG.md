@@ -1,5 +1,22 @@
 # Changes
 
+## [1.9.0] - 2026-11-18
+
+### Added
+- Two more effects under **Beat effects** on the Studio screen, on for new looks and presets:
+  - **Bounce on beats:** the symbol squashes on each beat (up to 12 % shorter and wider at the default strength), swings back up past its rest shape and settles like a damped spring (one 0.32 s swing, gone after 0.6 s). In the last 90 ms before the next beat it stretches up a little, so the hit lands with a snap; the next beat is expected one beat length after the latest one. It keeps the symbol's area (width is 1 / height) and pivots on the symbol's base, so it looks like it lands. Stronger beats bounce more. The color split and rainbow edge copies bounce with it; rings, rays and the rest of the frame do not.
+  - **Dots that orbit on the beat:** four dots circle the symbol and move one eighth of a turn on every beat with a small overshoot-and-settle (ease-out-back, 0.22 s), so they visibly land on the beat and make a full turn every two bars. They swell on each beat, half again as much on the first beat of a bar, and leave two fading dots behind while they move. They use the palette's third color.
+  - Squash and stretch is the classic animation principle; the "stretch as the beat comes, squash on it, rebound" order follows the Bounce move described in the IKANDY user guide. No code copied.
+  - **More options** adds **Bounce strength** and **Orbit dot size** (0 turns them off).
+- `BeatFx`: `bounceStretch`, `orbitSteps` and `orbitPulse`, with JVM tests.
+
+### Changed
+- Stored looks are now `lookVersion` 7. A look stored before 1.9 loads with the two new switches off, so it looks the same as before; the rules for older looks are unchanged.
+- **Ink storm** keeps both new effects. **Minimal pulse** turns both off.
+
+### Performance
+- The bounce is one canvas scale around the symbol. The orbit is at most 12 small circles. No per-frame allocation.
+
 ## [1.8.0] - 2026-11-18
 
 ### Added
