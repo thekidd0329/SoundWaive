@@ -1,5 +1,9 @@
 # SoundWaive release notes
 
+## 1.12.1 — Build fix
+
+- No changes to the app. The 1.12.0 package did not finish building on GitHub because a Maven download failed; this release is that same 1.12 work, rebuilt.
+
 ## 1.12.0 — Faster export on the GPU
 
 **What's new**

@@ -1,5 +1,10 @@
 # Changes
 
+## [1.12.1] - 2026-11-21
+
+### Fixed
+- The 1.12.0 GitHub Actions build never reached the compiler. Gradle stopped while downloading the Android Gradle Plugin classpath from Maven Central and the Gradle Plugin Portal, and reported well-known libraries as missing (including `kotlin-stdlib` 2.3.21 and JetBrains annotations 13.0). Those artifacts were published and are still there. v1.11.0 had built with the same Gradle 9.6.1 and Android Gradle Plugin 9.4.0 a few minutes earlier. This release retriggers that build; the GPU export path is unchanged.
+
 ## [1.12.0] - 2026-11-19
 
 ### Added
