@@ -1,5 +1,13 @@
 # Changes
 
+## [1.13.1] - 2026-11-21
+
+### Fixed
+- The 1.13.0 GitHub Actions build failed to compile `AiUpscale.kt`. LiteRT 2.3.0's Kotlin API is published with metadata version 2.4, and the Kotlin 2.2 compiler that ships with Android Gradle Plugin 9.4 can only read up to 2.3. The build now passes `-Xskip-metadata-version-check`, the same flag Google's LiteRT samples use.
+
+### Changed
+- Includes 1.12.1 (retriggers the 1.12 CI run after a Maven download failure).
+
 ## [1.13.0] - 2026-11-19
 
 ### Added

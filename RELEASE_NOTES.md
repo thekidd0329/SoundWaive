@@ -1,5 +1,9 @@
 # SoundWaive release notes
 
+## 1.13.1 — Build fix
+
+- The 1.13.0 package did not finish building on GitHub because LiteRT's Kotlin library is newer than the compiler bundled with the Android Gradle Plugin. This release compiles with that difference allowed; the app itself is unchanged.
+
 ## 1.13.0 — AI-sharpened backgrounds
 
 **What's new**

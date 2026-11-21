@@ -1,5 +1,11 @@
 # Verification
 
+## 1.13.1 LiteRT Kotlin metadata — November 21, 2026
+
+- Nothing was compiled, tested, rendered or run on a phone. The failed run was `44622036485` on `feature/ai-upscale` (commit `26df280`, 19 November 2026). `:app:compileDebugKotlin` failed with 77 errors of the form: LiteRT classes (`CompiledModel`, `Accelerator`, `TensorBuffer` and others) "compiled with an incompatible version of Kotlin. The actual metadata version is 2.4.0, but the compiler version 2.2.0 can read versions up to 2.3.0." The compiler also printed "use `-Xskip-metadata-version-check` to suppress errors." That flag is now set on `KotlinCompile` in `app/build.gradle.kts`.
+- Also includes 1.12.1.
+- Not yet checked: that the new GitHub Actions run for this branch finishes the assemble and lint steps. Phone checks from 1.13.0 are still outstanding.
+
 ## 1.13.0 AI background sharpening (LiteRT) — November 19, 2026
 
 - Nothing was compiled, tested, rendered or run on a phone. The change was checked against:
