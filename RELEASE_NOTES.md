@@ -15,6 +15,10 @@
 - Looks you saved before 1.13 keep their background exactly as it was (the switch is off).
 - This version needs Android 12 or newer on a 64-bit phone (it's built for your Pixel).
 
+## 1.12.1 — Build fix
+
+- No changes to the app. The 1.12.0 package did not finish building on GitHub because a Maven download failed; this release is that same 1.12 work, rebuilt.
+
 ## 1.12.0 — Faster export on the GPU
 
 **What's new**

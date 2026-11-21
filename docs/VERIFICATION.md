@@ -19,6 +19,11 @@
   - cache reuse on re-export
   - that looks saved in 1.12 open with the switch off
 
+## 1.12.1 CI download failure — November 21, 2026
+
+- Nothing was compiled, tested or rendered on the build box. The failed run was `44620296172` on `feature/gpu-effects` (commit `418803d`, 19 November 2026). Gradle failed at project configuration with `Could not resolve all artifacts for configuration 'classpath'`, listing 40+ well-known libraries as missing from Google Maven, Maven Central and the Gradle Plugin Portal, including `org.jetbrains.kotlin:kotlin-stdlib:2.3.21` and `org.jetbrains:annotations:13.0`. The same artifacts return HTTP 200 from Maven Central today, and the 1.11.0 and 1.13.0 CI runs (minutes before and after) resolved that same classpath with the same Gradle 9.6.1 and Android Gradle Plugin 9.4.0. There is no app or shader change in this patch; it exists so the 1.12 build can run again.
+- Not yet checked: that the new GitHub Actions run for this branch finishes the assemble and lint steps.
+
 ## 1.12.0 GPU effects pass and zero-copy video backgrounds — November 19, 2026
 
 - Nothing was compiled, tested or rendered on the build box. The change was checked by reading it against the existing sources and the Android and Khronos docs:
