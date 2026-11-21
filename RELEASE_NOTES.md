@@ -1,5 +1,17 @@
 # SoundWaive release notes
 
+## 1.14.0 — Export in the background
+
+**What's new**
+- **Exports keep running when you leave the app.** You no longer have to keep SoundWaive on screen while a video renders. A notification shows the percentage, and you can cancel from there.
+- When the video is ready (or if it stops), you get a notification. Opening the app brings back the usual "Your video is ready" message.
+
+**Good to know**
+- Android may ask for permission to show notifications when you first export. You can still export if you decline, but the progress notification may be harder to see.
+- Android allows this kind of background video work for 6 hours in a 24-hour period. Opening the app resets that timer. A several-minute song is well inside the limit.
+- Beat analysis still needs the app to stay open. Only the video export can run in the background.
+
+
 ## 1.13.1 — Build fix
 
 - The 1.13.0 package did not finish building on GitHub because LiteRT's Kotlin library is newer than the compiler bundled with the Android Gradle Plugin. This release compiles with that difference allowed; the app itself is unchanged.

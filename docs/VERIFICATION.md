@@ -1,5 +1,23 @@
 # Verification
 
+## 1.14.0 background export — November 21, 2026
+
+- Nothing was compiled, tested, rendered or run on a phone. The change was checked by reading the 1.13.1 sources and the current Android 15/16 documentation:
+  - Export already ran on `MainActivity`'s single-thread executor (`worker.submit` in `renderExport`). `onPause` only paused playback, abandoned audio focus and saved settings. It did not cancel the export. `onDestroy` did set `cancel` and shut down the worker, which would stop an export if the activity was destroyed.
+  - There is no `lifecycleScope` or `repeatOnLifecycle`. The preview is a custom `View` invalidated on the UI thread; export constructs its own `VisualRenderer` and draws to `MediaCodec.createInputSurface()` plus an offscreen EGL context (`EncoderSurface`), not a `SurfaceView`.
+  - The pause when leaving the app matches the cached-apps freezer: with no foreground service, a process that is no longer visible becomes cached and, on Android 14+, is frozen about 10 seconds later, which suspends every thread. A `mediaProcessing` foreground service keeps the process out of that state.
+  - Foreground service type `mediaProcessing` (Android 15+), permission `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `startForeground(id, notification, FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)`, and `Service.onTimeout(int, int)`: 6 hours in 24, shared by all of the app's services of that type, reset when the user brings the app to the foreground. Documented at https://developer.android.com/develop/background-work/services/fgs/service-types and https://developer.android.com/develop/background-work/services/fgs/timeout (updated 2026-11-16).
+  - `POST_NOTIFICATIONS` (Android 13+) is requested before the create-document picker. A partial wake lock with a 6-hour timeout is acquired because `FLAG_KEEP_SCREEN_ON` only applies while the window is visible, and a foreground service does not itself keep the CPU awake with the screen off.
+  - GPU/TPU: Android 16's Mali syscall filtering does not affect OpenGL or Vulkan. A foreground service keeps the process unfrozen, so GLES, MediaCodec and LiteRT (GPU delegate on the export thread's EGL context, or the Tensor TPU) can keep running. If a chip were unavailable, the existing CPU fallback still applies.
+- Alternatives noted, not implemented: WorkManager `setForeground` (still an FGS; better for deferrable work) and user-initiated data-transfer jobs (meant for network transfers, not transcoding).
+- Not yet checked: everything on a phone, in particular:
+  - that an export keeps going after Home, after switching apps, and after the screen turns off
+  - that the notification percentage tracks the in-app bar, and that Cancel from the notification or the app stops the export and deletes the unfinished file
+  - that returning to the app mid-export shows the current progress, and that returning after it finishes shows "Your video is ready"
+  - that the first export asks for notifications, and that a declined permission still produces a video
+  - that beat analysis still pauses or stops when the app is left in the background (that path is unchanged)
+
+
 ## 1.13.1 LiteRT Kotlin metadata — November 21, 2026
 
 - Nothing was compiled, tested, rendered or run on a phone. The failed run was `44622036485` on `feature/ai-upscale` (commit `26df280`, 19 November 2026). `:app:compileDebugKotlin` failed with 77 errors of the form: LiteRT classes (`CompiledModel`, `Accelerator`, `TensorBuffer` and others) "compiled with an incompatible version of Kotlin. The actual metadata version is 2.4.0, but the compiler version 2.2.0 can read versions up to 2.3.0." The compiler also printed "use `-Xskip-metadata-version-check` to suppress errors." That flag is now set on `KotlinCompile` in `app/build.gradle.kts`.
