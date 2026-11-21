@@ -77,6 +77,13 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 }
 
+// LiteRT 2.3.0's Kotlin API is compiled with metadata 2.4. AGP 9.4 ships Kotlin 2.2,
+// which can only read metadata up to 2.3, so skip that check (same flag as Google's
+// LiteRT samples).
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions { freeCompilerArgs.add("-Xskip-metadata-version-check") }
+}
+
 val nativeEngine =
     tasks.register("buildNativeEngine") {
         inputs.dir(rootProject.file("engine/src"))
