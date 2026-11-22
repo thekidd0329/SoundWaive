@@ -1,5 +1,36 @@
 # SoundWaive release notes
 
+## 1.14.0 — Export in the background
+
+**What's new**
+- **Exports keep running when you leave the app.** You no longer have to keep SoundWaive on screen while a video renders. A notification shows the percentage, and you can cancel from there.
+- When the video is ready (or if it stops), you get a notification. Opening the app brings back the usual "Your video is ready" message.
+
+**Good to know**
+- Android may ask for permission to show notifications when you first export. You can still export if you decline, but the progress notification may be harder to see.
+- Android allows this kind of background video work for 6 hours in a 24-hour period. Opening the app resets that timer. A several-minute song is well inside the limit.
+- Beat analysis still needs the app to stay open. Only the video export can run in the background.
+
+
+## 1.13.1 — Build fix
+
+- The 1.13.0 package did not finish building on GitHub because LiteRT's Kotlin library is newer than the compiler bundled with the Android Gradle Plugin. This release compiles with that difference allowed; the app itself is unchanged.
+
+## 1.13.0 — AI-sharpened backgrounds
+
+**What's new**
+- **Sharper, cleaner backgrounds.** A new switch, **Sharpen & clean up background (AI)**, makes small or blurry background photos and videos sharp and removes noise and blocky compression. It runs on the Pixel's AI chip (TPU) when it can, otherwise on the graphics chip.
+- When your video is ready, the message tells you which chip did the work.
+
+**Where to find it**
+- Studio › **Background**, when the background is a photo or a video. It's on for new looks.
+
+**Good to know**
+- A photo is sharpened once when you pick it, so the preview and every export use the sharp version.
+- Video backgrounds are sharpened while exporting, so the first export with a low-resolution video takes longer. Exporting the same clip again reuses the work.
+- Looks you saved before 1.13 keep their background exactly as it was (the switch is off).
+- This version needs Android 12 or newer on a 64-bit phone (it's built for your Pixel).
+
 ## 1.12.1 — Build fix
 
 - No changes to the app. The 1.12.0 package did not finish building on GitHub because a Maven download failed; this release is that same 1.12 work, rebuilt.

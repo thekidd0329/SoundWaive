@@ -1,5 +1,51 @@
 # Changes
 
+## [1.14.0] - 2026-11-21
+
+### Added
+- **Background export.** Leaving SoundWaive no longer pauses a render. Export now runs in `ExportService`, a `mediaProcessing` foreground service, so Android's cached-apps freezer does not suspend the process when the app is no longer on screen.
+  - A notification shows the percentage and a Cancel action. Tapping it returns to the app. When the export finishes or fails, a second notification says so.
+  - `ExportSession` holds the job and progress so the Export screen can reattach, and so a destroyed and recreated activity does not wipe the song cache or reload the demo over a running export.
+  - Android 13+ asks for the notification permission before the file picker. The export still starts if that permission is declined (the foreground-service notification can still appear).
+  - `onPause` still only pauses playback; it does not cancel the export. `onDestroy` no longer cancels a running export. The export already drew to an offscreen MediaCodec/EGL surface, not the preview.
+  - A partial wake lock is held for up to 6 hours, the same limit Android sets on `mediaProcessing` services, so the CPU can keep working with the screen off. `Service.onTimeout(int, int)` cancels the export and stops the service if that limit is reached.
+- Manifest permissions: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PROCESSING` and `POST_NOTIFICATIONS`. `WAKE_LOCK` was already declared and is now used.
+
+### Changed
+- Copy on the Export screen, in Help, and in the docs no longer says to keep the app open while exporting. Analysis still needs the app to stay open.
+
+### Notes
+- WorkManager `setForeground` was considered; it still starts a foreground service, and this work is user-started and should begin immediately, so a dedicated service is the better fit. A user-initiated data-transfer job is for uploads and downloads, not transcoding.
+- A foreground service keeps the process out of the cached (frozen) state, so the existing GLES, MediaCodec and LiteRT GPU/TPU work can continue. Android 16's GPU syscall filtering does not affect OpenGL. If a chip were ever unavailable in the background, the export already falls back to the CPU path.
+
+
+## [1.13.1] - 2026-11-21
+
+### Fixed
+- The 1.13.0 GitHub Actions build failed to compile `AiUpscale.kt`. LiteRT 2.3.0's Kotlin API is published with metadata version 2.4, and the Kotlin 2.2 compiler that ships with Android Gradle Plugin 9.4 can only read up to 2.3. The build now passes `-Xskip-metadata-version-check`, the same flag Google's LiteRT samples use.
+
+### Changed
+- Includes 1.12.1 (retriggers the 1.12 CI run after a Maven download failure).
+
+## [1.13.0] - 2026-11-19
+
+### Added
+- **Sharpen & clean up background (AI)**, a switch under Studio › Background for photo and video backgrounds. It runs Real-ESRGAN-General-x4v3, a 4x super-resolution model trained on noisy, compressed pictures, through LiteRT 2.3.0's `CompiledModel` API (`AiUpscale.kt`).
+  - Chips are tried in order: the Tensor G5 TPU with an AOT-compiled `*_Google_Tensor_G5.tflite` (if bundled), then the GPU, then the CPU. A TPU load that runs at CPU speed (more than 150 ms per tile) counts as failed.
+  - Pictures are cut into 128 × 128 tiles that overlap by 8 px, with only each tile's middle kept, so no seams show.
+  - Photos are processed once, at import or when the switch is turned on, and saved to `files/background-ai.png` for the preview and every export. Only photos under 1080 px on the short side are processed.
+  - Video frames are processed during export, with one CPU copy per frame. Only frames below the export's background size are processed. Results are cached per frame as JPEG in `cache/ai-video/`, newest clip only, so re-exports skip the model.
+  - The "Your video is ready" box names the chip ("Background sharpened by AI on the TPU/GPU/CPU.").
+  - Any load or run failure is logged and the plain background is used. An export never fails because of it.
+- Bundled model `assets/models/real_esrgan_general_x4v3.tflite` (4.9 MB, float, sha256 `47dbfe34…4b9846`), recorded in `assets.sha256` and `licenses/NOTICE.md` (BSD-3-Clause, `licenses/Real-ESRGAN-LICENSE`).
+- `scripts/fetch_models.sh` re-downloads the model and checks its hash. `scripts/aot_compile_g5.py` compiles it for the Tensor G5 with `ai_edge_litert.aot` (needs Tensor SDK beta access).
+- `docs/AI-UPSCALE.md`: chips, caching, cost, the AOT step, and the pitfalls (version matching, `GOOGLE_TENSOR_BACKEND_ENABLED`, edgetpu_app_service error 16).
+
+### Changed
+- Pixel-only build: minSdk 31 (LiteRT NPU support needs it), arm64-v8a only, extracted native libraries, uncompressed `.tflite` assets. Dependencies: `com.google.ai.edge.litert:litert`, `litert-gpu` and `litert-npu-runtime-google-tensor`, all 2.3.0.
+- Stored looks are now `lookVersion` 10. Looks stored before 1.13 load with the AI switch off, so their background is unchanged. New looks have it on.
+- A video export with the AI switch on, and frames small enough to gain from it, draws the background through the Canvas, so 1.12's zero-copy video texture is skipped for that export.
+
 ## [1.12.1] - 2026-11-21
 
 ### Fixed

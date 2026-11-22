@@ -27,18 +27,22 @@ android {
     defaultConfig {
         // Keep the existing identity so this is an update to the original private build.
         applicationId = "com.parker.crownpulse"
-        minSdk = 26
+        // Pixel-only build: LiteRT's NPU (Tensor TPU) runtime needs Android 12 and arm64.
+        minSdk = 31
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.12.1"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        versionCode = 18
+        versionName = "1.14.0"
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("rust-jni").get().asFile)
+    // Extracted native libraries: LiteRT finds the Tensor dispatch library on disk.
     packaging { jniLibs.useLegacyPackaging = true }
+    // Models are memory-mapped from the APK, so keep them uncompressed.
+    androidResources { noCompress += "tflite" }
     signingConfigs {
         if (hasReleaseSigning)
             create("privateRelease") {
@@ -61,7 +65,24 @@ android {
     lint { abortOnError = true }
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+// LiteRT, its GPU accelerator and the Google Tensor NPU dispatch library. The three must be
+// the same version, and an AOT-compiled *_Google_Tensor_G5.tflite must be compiled for it
+// (see docs/AI-UPSCALE.md).
+val litert = "2.3.0"
+
+dependencies {
+    implementation("com.google.ai.edge.litert:litert:$litert")
+    implementation("com.google.ai.edge.litert:litert-gpu:$litert")
+    implementation("com.google.ai.edge.litert:litert-npu-runtime-google-tensor:$litert")
+    testImplementation("junit:junit:4.13.2")
+}
+
+// LiteRT 2.3.0's Kotlin API is compiled with metadata 2.4. AGP 9.4 ships Kotlin 2.2,
+// which can only read metadata up to 2.3, so skip that check (same flag as Google's
+// LiteRT samples).
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions { freeCompilerArgs.add("-Xskip-metadata-version-check") }
+}
 
 val nativeEngine =
     tasks.register("buildNativeEngine") {
@@ -95,11 +116,8 @@ val nativeEngine =
             require(ndk.isDirectory) { "Install Android NDK 28.2.13676358; expected $ndk" }
             val targetDir = rootProject.layout.buildDirectory.dir("rust-target").get().asFile
             val targets =
-                mapOf(
-                    "aarch64-linux-android" to "arm64-v8a",
-                    "armv7-linux-androideabi" to "armeabi-v7a",
-                    "x86_64-linux-android" to "x86_64",
-                )
+                // arm64 only (Pixel-only build, see abiFilters).
+                mapOf("aarch64-linux-android" to "arm64-v8a")
             for ((target, abi) in targets) {
                 val clangTarget =
                     if (target == "armv7-linux-androideabi") "armv7a-linux-androideabi" else target
