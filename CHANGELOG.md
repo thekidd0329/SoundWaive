@@ -1,5 +1,24 @@
 # Changes
 
+## [1.14.0] - 2026-11-21
+
+### Added
+- **Background export.** Leaving SoundWaive no longer pauses a render. Export now runs in `ExportService`, a `mediaProcessing` foreground service, so Android's cached-apps freezer does not suspend the process when the app is no longer on screen.
+  - A notification shows the percentage and a Cancel action. Tapping it returns to the app. When the export finishes or fails, a second notification says so.
+  - `ExportSession` holds the job and progress so the Export screen can reattach, and so a destroyed and recreated activity does not wipe the song cache or reload the demo over a running export.
+  - Android 13+ asks for the notification permission before the file picker. The export still starts if that permission is declined (the foreground-service notification can still appear).
+  - `onPause` still only pauses playback; it does not cancel the export. `onDestroy` no longer cancels a running export. The export already drew to an offscreen MediaCodec/EGL surface, not the preview.
+  - A partial wake lock is held for up to 6 hours, the same limit Android sets on `mediaProcessing` services, so the CPU can keep working with the screen off. `Service.onTimeout(int, int)` cancels the export and stops the service if that limit is reached.
+- Manifest permissions: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PROCESSING` and `POST_NOTIFICATIONS`. `WAKE_LOCK` was already declared and is now used.
+
+### Changed
+- Copy on the Export screen, in Help, and in the docs no longer says to keep the app open while exporting. Analysis still needs the app to stay open.
+
+### Notes
+- WorkManager `setForeground` was considered; it still starts a foreground service, and this work is user-started and should begin immediately, so a dedicated service is the better fit. A user-initiated data-transfer job is for uploads and downloads, not transcoding.
+- A foreground service keeps the process out of the cached (frozen) state, so the existing GLES, MediaCodec and LiteRT GPU/TPU work can continue. Android 16's GPU syscall filtering does not affect OpenGL. If a chip were ever unavailable in the background, the export already falls back to the CPU path.
+
+
 ## [1.13.1] - 2026-11-21
 
 ### Fixed

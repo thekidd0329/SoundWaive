@@ -8,7 +8,7 @@ Install **SoundWaive-Android.apk** on your Android phone. Android may ask you to
 2. Tap **Import music** to choose your FLAC or another audio file that Android supports. Wait for the beat and bass-note analysis.
 3. Press **Play**. Choose a preset in **Studio**, then customize **Look** and **Motion**. Tap the expand button for a full-screen preview.
 4. In **Export**, choose the shape, resolution, frame rate and quality. Leave the end time at **0** to include the whole song.
-5. Tap **Export video**, choose a location in Files, and keep the app open until it finishes. The MP4 includes your music. You can play or share it from the app.
+5. Tap **Export video**, choose a location in Files, and allow notifications if Android asks. You can leave the app; a notification shows the percentage until it finishes. The MP4 includes your music. You can play or share it from the app.
 
 ## Keep it fresh
 
@@ -36,7 +36,7 @@ Transparent PNGs work best for custom symbols. Disable **Tint imported artwork**
 - Music stays on your device. There is no account, upload, subscription or Internet permission.
 - Beat timing, energy and approximate bass pitches come from local analysis. The flying notes are expressive animation, not verified sheet music.
 - Mono/stereo tracks up to 30 minutes are supported. Codec availability and export speed depend on the phone. If a size/frame-rate combination is unsupported, try 720p at 30 fps.
-- Keep the app open during analysis and export. Cancel stops the operation and removes an unfinished video. The current song returns to the generated demo after a fresh app launch; saved looks and custom artwork persist.
+- Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage. Cancel stops the operation and removes an unfinished video. The current song returns to the generated demo after a fresh app launch, unless an export is still running; saved looks and custom artwork persist.
 - Settings files save controls. They do not contain your song or custom images; import those separately on another phone.
 - The bundled demo is generated from oscillators and noise. Your unreleased music is not bundled. The crown is your supplied artwork.
 
