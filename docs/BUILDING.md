@@ -55,7 +55,9 @@ The default release build is unsigned. To produce a signed release, provide **al
 
 Then run `./gradlew :app:assembleRelease :app:bundleRelease`. The signed APK is `app/build/outputs/apk/release/app-release.apk`. Partial signing configuration is rejected. Do not add passwords or keystores to tracked files, workflow YAML, logs or build artifacts.
 
-The original private signing key remains outside this repository in the existing local build workspace. Reuse it for compatible updates; generating a new key will prevent Android from updating that installed app. Keep a secure backup. The GitHub workflow intentionally has no access to that key and produces a separately installable development build plus unsigned release packages.
+### Published releases
+
+Signed releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed (or by running it manually with an existing tag). The release key (`soundwaive-release`, RSA 4096, created for v1.14.0) lives only in the repository secrets `SOUNDWAIVE_KEYSTORE_BASE64`, `SOUNDWAIVE_STORE_PASSWORD`, `SOUNDWAIVE_KEY_ALIAS` and `SOUNDWAIVE_KEY_PASSWORD`; the owner keeps an offline backup of the keystore and its passwords. Every future release must be signed with this same key so updates install over each other. Builds signed with the earlier local key cannot be updated by this key, so uninstall that install once before installing a v1.14.0+ release. The workflow verifies the APK signature with `apksigner`, publishes a GitHub prerelease with `SoundWaive-<tag>-beta.apk`, `.aab` and `SHA256SUMS.txt`, and deletes the decoded keystore from the runner. The regular `android.yml` workflow still has no access to the key and produces the development build plus unsigned release packages.
 
 Reference: [Android app signing](https://developer.android.com/studio/publish/app-signing), [Gradle wrapper verification](https://docs.gradle.org/current/userguide/gradle_wrapper.html#sec:verification).
 
