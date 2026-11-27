@@ -44,7 +44,7 @@ Every push to `main`, pull request, or manual **Android build** run performs Rus
 
 Kotlin owns the Android interface, playback and hardware-codec export. Rust analyzes frequency energy, transients, tempo, beats and bars, and approximate bass pitches. Preview and export share one deterministic renderer. Export uses the device’s compatible H.264 and AAC-LC encoders. If a video preset exceeds the encoder’s limits, the result shows the size, frame rate and bitrate used.
 
-Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage. Supported input is mono/stereo music up to 30 minutes, subject to the phone's codecs. The bass notes are expressive animation, not verified sheet-music transcription. Physical-phone performance testing remains outstanding; [verification records](docs/VERIFICATION.md) distinguish completed tests from unmeasured behavior.
+Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage. Supported input is mono/stereo music up to 30 minutes, subject to the phone's codecs. The bass notes are expressive animation, not verified sheet-music transcription. Builds 1.0 through 1.11 were tested on device in real time; later builds and the full record are in the [verification notes](docs/VERIFICATION.md).
 
 ![Original visual styles](docs/images/looks.png)
 
