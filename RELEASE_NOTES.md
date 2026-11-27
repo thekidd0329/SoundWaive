@@ -1,5 +1,23 @@
 # SoundWaive release notes
 
+## 1.17.0 — Word-timed lyrics
+
+**What's new**
+- **Karaoke lyrics on your videos.** Open the new **Lyrics** tab, paste the words (or dictate them a line at a time), and tap **Align lyrics**. SoundWaive times every word to your song, right on your phone, with no internet.
+- The current line shows over the video. Words light up as they're sung, and the next line waits underneath.
+- Lyrics now sit **above the crown**, so they're never hidden behind it. The crown itself moves exactly as before.
+- **Fix flagged words.** Words the app isn't sure about are listed. Tap **Fix flagged words**, listen, and tap when you hear each one. SoundWaive snaps your tap to the start of the sound. **Calibrate taps** first makes it even more accurate.
+- Every Release Pack video gets lyrics framed for its shape. The Spotify Canvas leaves them off unless you turn on **Lyrics on the Spotify Canvas loop**, since Spotify shows its own.
+
+**Where to find it**
+- **Lyrics** tab: text, Align, Fix, Calibrate, and how lyrics look (on/off, position, size, colors).
+
+**Good to know**
+- Timing takes a few seconds per minute of music. **Skip instrumental parts** is slower but helps around solos and long intros.
+- Lyrics are saved with each song, so they're there the next time you import it.
+- Dictation is only for typing the lyrics. Android asks for the microphone the first time you use it.
+- The app is about 40 MB larger because of the lyrics models.
+
 ## 1.16.0 — Android device compatibility
 
 SoundWaive now installs on Android 8.0 and newer across 32-bit and 64-bit ARM and Intel devices. Background sharpening uses the available GPU or CPU, with optional Tensor G5 acceleration. Exports continue when you leave the app. When the phone needs a lower video setting, the completed export shows what it used.
