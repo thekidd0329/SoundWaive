@@ -26,7 +26,7 @@ SOFTWARE.
 
 ----
 
-cmudict-nostress.txt.gz: derived from the CMU Pronouncing Dictionary (stress marks removed, first pronunciation per word):
+cmudict-nostress.dict (gzip-compressed; packaged under a .dict name because Android's asset packager strips a trailing .gz): derived from the CMU Pronouncing Dictionary (stress marks removed, first pronunciation per word):
 
 Copyright (C) 1993-2015 Carnegie Mellon University. All rights reserved.
 

@@ -1,5 +1,10 @@
 # Changes
 
+## [1.17.1] - 2026-11-27
+
+### Fixed
+- Align lyrics failed on device with "Couldn't finish: lyrics/cmudict-nostress.txt.gz". Android's asset packager strips a trailing `.gz` from filenames, so the pronunciation dictionary never made it into the APK under that name. The dictionary is now bundled as `cmudict-nostress.dict` and copied to `cmudict-nostress.txt.gz` in the model folder, which is the name the engine already reads. Installing this update recopies the models. ONNX models and the dictionary are also packaged uncompressed, the same way `.tflite` already is.
+
 ## [1.17.0] - 2026-11-26
 
 ### Added

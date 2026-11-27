@@ -43,8 +43,8 @@ android {
         minSdk = minimumAndroidApi
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 21
-        versionName = "1.17.0"
+        versionCode = 22
+        versionName = "1.17.1"
         ndk { abiFilters += androidTargets.keys }
     }
     compileOptions {
@@ -55,7 +55,11 @@ android {
     // Extracted native libraries: LiteRT finds the Tensor dispatch library on disk.
     packaging { jniLibs.useLegacyPackaging = true }
     // Models are memory-mapped from the APK, so keep them uncompressed.
-    androidResources { noCompress += "tflite" }
+    androidResources {
+        noCompress += "tflite"
+        noCompress += "onnx"
+        noCompress += "dict"
+    }
     signingConfigs {
         if (hasReleaseSigning)
             create("privateRelease") {
