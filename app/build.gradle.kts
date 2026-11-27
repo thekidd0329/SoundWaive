@@ -27,6 +27,10 @@ val androidTargets = mapOf(
     "x86_64" to "x86_64-linux-android",
 )
 val minimumAndroidApi = 26
+// ABIs whose engine is built with the `lyrics` cargo feature (tract ONNX). All four build on
+// NDK 28.2.13676358; drop an ABI here and its engine builds with --no-default-features, so
+// NativeEngine.lyricsAvailable() is false there and the app hides the Lyrics screen.
+val lyricsAbis = setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
 
 android {
     namespace = "com.parker.crownpulse"
@@ -39,8 +43,8 @@ android {
         minSdk = minimumAndroidApi
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 20
-        versionName = "1.16.0"
+        versionCode = 21
+        versionName = "1.17.0"
         ndk { abiFilters += androidTargets.keys }
     }
     compileOptions {
@@ -105,7 +109,9 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 val nativeEngine =
     tasks.register("buildNativeEngine") {
         inputs.dir(rootProject.file("engine/src"))
+        inputs.dir(rootProject.file("engine/lyrics-aligner/src"))
         inputs.files(
+            rootProject.file("engine/lyrics-aligner/Cargo.toml"),
             rootProject.file("engine/Cargo.toml"),
             rootProject.file("engine/Cargo.lock"),
             rootProject.file("rust-toolchain.toml"),
@@ -115,6 +121,7 @@ val nativeEngine =
         inputs.files(x86Interpreter, x86Bridge)
         inputs.property("androidTargets", androidTargets)
         inputs.property("minimumAndroidApi", minimumAndroidApi)
+        inputs.property("lyricsAbis", lyricsAbis)
         outputs.dir(layout.buildDirectory.dir("rust-jni"))
         doLast {
             val local =
@@ -175,6 +182,7 @@ val nativeEngine =
                             "--lib",
                             "--target",
                             target,
+                            *(if (abi in lyricsAbis) emptyArray<String>() else arrayOf("--no-default-features")),
                         )
                         .directory(rootProject.file("engine"))
                         .inheritIO()
@@ -182,6 +190,12 @@ val nativeEngine =
                 process
                     .environment()["CARGO_TARGET_${target.uppercase().replace('-', '_')}_LINKER"] =
                     linker.absolutePath
+                // tract's build script compiles its assembly kernels with the cc crate: point it
+                // at the same NDK clang and archiver.
+                val ccTarget = target.replace('-', '_')
+                process.environment()["CC_$ccTarget"] = linker.absolutePath
+                process.environment()["AR_$ccTarget"] =
+                    File(ndk, "llvm-ar" + if (host.startsWith("windows")) ".exe" else "").absolutePath
                 process.environment().remove("CARGO_ENCODED_RUSTFLAGS")
                 process.environment()["RUSTFLAGS"] = "-C link-arg=-Wl,-z,max-page-size=16384"
                 check(process.start().waitFor() == 0) {
