@@ -31,8 +31,8 @@ jobs:
         run: '"${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;36.0.0" "ndk;28.2.13676358"'
       - name: Install pinned Rust and Android targets
         run: |
-          rustup toolchain install 1.100.0 --profile minimal --component rustfmt --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-          rustc --version
+          rustup show active-toolchain
+          rustup target list --installed
       - name: Set up generated demo tools
         run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Run checks and build Android packages
