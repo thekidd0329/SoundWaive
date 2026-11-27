@@ -17,7 +17,7 @@ internal class AvcEncoder(
         fun open(width: Int, height: Int, fps: Int, bitrate: Int): AvcEncoder {
             val mime = MediaFormat.MIMETYPE_VIDEO_AVC
             val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
-                .filter { it.isEncoder && mime in it.supportedTypes }
+                .filter { it.isEncoder && it.supportedTypes.any { type -> type.equals(mime, ignoreCase = true) } }
                 .mapNotNull { info ->
                     val caps = runCatching { info.getCapabilitiesForType(mime) }.getOrNull()
                     if (caps == null || MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface !in caps.colorFormats) null
@@ -34,9 +34,12 @@ internal class AvcEncoder(
                         val encodedW = if (rotate) h else w
                         val encodedH = if (rotate) w else h
                         for ((name, caps) in encoders) {
-                            val video = caps.videoCapabilities
-                            if (!video.areSizeAndRateSupported(encodedW, encodedH, rate.toDouble())) continue
-                            val bits = video.bitrateRange.clamp(bitrate)
+                            // A broken vendor capability record must not block the other encoders.
+                            val bits = runCatching {
+                                val video = caps.videoCapabilities
+                                if (!video.areSizeAndRateSupported(encodedW, encodedH, rate.toDouble())) null
+                                else video.bitrateRange.clamp(bitrate)
+                            }.getOrNull() ?: continue
                             val format = MediaFormat.createVideoFormat(mime, encodedW, encodedH).apply {
                                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                                 setInteger(MediaFormat.KEY_BIT_RATE, bits)
@@ -46,7 +49,16 @@ internal class AvcEncoder(
                                 setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
                                 setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
                             }
-                            val device = start(name, format) ?: continue
+                            // Some OEM codecs support AVC surfaces but reject optional color keys.
+                            // Keep explicit BT.709 where possible, then retry with mandatory keys only.
+                            val device = start(name, format) ?: start(name,
+                                MediaFormat.createVideoFormat(mime, encodedW, encodedH).apply {
+                                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                                    setInteger(MediaFormat.KEY_BIT_RATE, bits)
+                                    setInteger(MediaFormat.KEY_FRAME_RATE, rate)
+                                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+                                }
+                            ) ?: continue
                             val notice = if (size != short || rate != fps || bits != bitrate) {
                                 "This device exported at ${w}×${h}, $rate fps and ${bits / 1000} kbps."
                             } else null
