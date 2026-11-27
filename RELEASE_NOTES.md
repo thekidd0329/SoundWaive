@@ -1,5 +1,17 @@
 # SoundWaive release notes
 
+## 1.17.5 — Cache cleanup
+
+**What's new**
+- **Clear cache** is on the Export screen, under Storage. It shows how much temporary cache the app is using (imported audio you are not listening to, export scratch and AI video frames) and lets you free it. It does not remove saved looks, artwork, backgrounds, the demo or finished videos.
+- Cache is only cleared when you tap that button. It does not run when you open the app or when an export finishes.
+
+**Good to know**
+- A later export of the same AI-sharpened video background can reuse the frame cache until you tap Clear cache. That cache can use a few hundred megabytes until then.
+- The song you currently have open is kept, so you don't have to import it again.
+- **Clear cache** is turned off while an export is running.
+- Finished videos in Movies, your gallery, or the file you picked stay put, including after you clear cache and reopen the app.
+
 ## 1.17.1 — Lyrics dictionary fix
 
 - Align lyrics failed right away with a missing-file message for the pronunciation dictionary. Android was dropping the `.gz` ending from that bundled file when it packaged the app. This release ships the dictionary under a name that stays intact, then copies it to the name the aligner already expects. Update and tap Align lyrics again; no Wi-Fi is needed.

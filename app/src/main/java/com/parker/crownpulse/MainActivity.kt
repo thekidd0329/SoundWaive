@@ -115,12 +115,6 @@ class MainActivity : Activity() {
         restorePack()
         restoreImages()
         val exportJob = ExportSession.job
-        if (exportJob == null) {
-            for (dir in cacheDir.listFiles() ?: emptyArray()) if (
-                dir.name.startsWith("track-") || dir.name == "exports"
-            )
-                dir.deleteRecursively()
-        }
         buildUi()
         refreshBackground()
         if (exportJob != null) restoreTrack(exportJob.track) else loadDemo()
@@ -1652,6 +1646,42 @@ class MainActivity : Activity() {
                 )
             }
         )
+        val keep = track?.pcm?.parentFile
+        val cacheBytes = AppCache.size(cacheDir, keep)
+        section(
+            "Storage",
+            "Temporary files (imported audio, export scratch and AI video frames) are using " +
+                "${AppCache.format(cacheBytes)}. Cache is cleared only when you tap Clear cache; " +
+                "it does not run when you open the app or when an export ends. It does not " +
+                "remove saved looks, artwork, backgrounds, the demo or finished videos. The " +
+                "song you have open is kept so you don’t have to import it again.",
+        )
+        val clear =
+            button("Clear cache") {
+                if (ExportSession.isRunning()) {
+                    toast("Can’t clear cache while an export is running.")
+                    return@button
+                }
+                if (busy) return@button
+                val keep = track?.pcm?.parentFile
+                startBusy("Clearing cache")
+                worker.submit {
+                    val before = AppCache.size(cacheDir, keep)
+                    AppCache.clean(cacheDir, keep)
+                    val freed = (before - AppCache.size(cacheDir, keep)).coerceAtLeast(0L)
+                    runOnUiThread {
+                        if (closing) return@runOnUiThread
+                        endBusy()
+                        toast(
+                            if (freed == 0L) "Nothing extra to clear."
+                            else "Cleared ${AppCache.format(freed)}."
+                        )
+                        if (page == "Export") showPage(page)
+                    }
+                }
+            }
+        clear.isEnabled = !ExportSession.isRunning()
+        addButtonRow(clear)
     }
 
     /** A single export ([pack] false, asks where to save) or a Release Pack (saves to Movies). */
@@ -1791,6 +1821,7 @@ class MainActivity : Activity() {
                     }
                     is ExportStatus.Failed -> {
                         endBusy()
+                        if (page == "Export") showPage("Export")
                         AlertDialog.Builder(this)
                             .setTitle("Couldn’t finish")
                             .setMessage(result.message)
@@ -1801,7 +1832,10 @@ class MainActivity : Activity() {
                         endBusy()
                         showPackResult(result)
                     }
-                    is ExportStatus.Canceled -> endBusy()
+                    is ExportStatus.Canceled -> {
+                        endBusy()
+                        if (page == "Export") showPage("Export")
+                    }
                     else -> {}
                 }
             }
@@ -2235,7 +2269,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Make every track its own world")
             .setMessage(
-                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nLyrics: paste or dictate the words, then Align. Every word is timed to the song on your phone, with no internet, and shows karaoke style above the symbol. Fix flagged words by tapping when you hear them.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size."
+                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nLyrics: paste or dictate the words, then Align. Every word is timed to the song on your phone, with no internet, and shows karaoke style above the symbol. Fix flagged words by tapping when you hear them.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size. Export › Storage shows temporary cache and has Clear cache; cache is only removed when you tap that button. Saved looks, photos and finished videos stay."
             )
             .setPositiveButton("Let’s make something", null)
             .show()

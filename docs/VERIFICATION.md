@@ -31,7 +31,7 @@ CI results are recorded separately. They are not a substitute for a device test.
 
 Everything else Christian tested on 1.0 through 1.11 worked smoothly.
 
-## 1.12.x through 1.17.1
+## 1.12.x through 1.17.5
 
 These builds are awaiting Christian's device test.
 
@@ -44,8 +44,9 @@ These builds are awaiting Christian's device test.
 | 1.14.0 | 2026-11-21 | Awaiting Christian's device test | Background export: a `mediaProcessing` foreground service so a render keeps going when the app leaves the screen. |
 | 1.15.0 | 2026-11-26 | Awaiting Christian's device test | Release Pack: one tap renders YouTube 16:9 (4K or 1080p), three distinct 15 s verticals, a 30 s reel, a square promo and a silent 8 s looping Spotify Canvas to Movies/SoundWaive/<song>/. Not built or run locally; awaiting CI and Christian's on-device test. |
 | 1.16.0 | 2026-11-22 | Awaiting Christian's device test | Android 8+ support across four ARM and Intel ABIs. |
-| 1.17.0 | 2026-11-26 | Awaiting Christian's device test | Word-timed karaoke lyrics: offline Rust aligner (tract ONNX), tap-to-fix, lyrics layer above the crown in preview, CPU and GPU export and every Release Pack shape (off on the Canvas by default). Not built with Gradle or run locally; awaiting CI and Christian's on-device test. |
+| 1.17.5 | 2026-11-27 | Awaiting Christian's device test | Manual Export › Clear cache only, on an allowlist of temp dirs; never deletes finished MP4s. Automatic launch/export sweeps removed after they deleted videos. Not built or run locally. |
 | 1.17.1 | 2026-11-27 | Awaiting Christian's device test | Fixes Align lyrics failing because Android's asset packager stripped the `.gz` suffix from the pronunciation dictionary. The dictionary is bundled as `cmudict-nostress.dict` and copied to the `cmudict-nostress.txt.gz` name the engine already reads. Not built with Gradle or run locally; awaiting Christian's device test. |
+| 1.17.0 | 2026-11-26 | Awaiting Christian's device test | Word-timed karaoke lyrics: offline Rust aligner (tract ONNX), tap-to-fix, lyrics layer above the crown in preview, CPU and GPU export and every Release Pack shape (off on the Canvas by default). Not built with Gradle or run locally; awaiting CI and Christian's on-device test. |
 
 GitHub Actions history for a given commit is at the [Android workflow runs](https://github.com/thekidd0329/SoundWaive/actions/workflows/android.yml).
 
