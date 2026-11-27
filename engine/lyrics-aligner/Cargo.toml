@@ -1,0 +1,19 @@
+[package]
+name = "lyrics-aligner"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Rust port of schufo/lyrics-aligner (Schulze-Forster et al. 2021): phoneme and word level lyrics-to-audio alignment"
+publish = false
+
+# Library only, linked into crownpulse_engine as an rlib. The ONNX models and the CMU
+# dictionary are not compiled in: the app ships them as assets and passes them at runtime.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+tract-onnx = "0.23"
+realfft = "3.5"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
