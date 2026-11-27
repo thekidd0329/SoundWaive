@@ -1,0 +1,87 @@
+name: Signed release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish (for example v1.14.0)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pinned Android packages
+        run: '"${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;36.0.0" "ndk;28.2.13676358"'
+      - name: Install pinned Rust and Android targets
+        run: |
+          rustup toolchain install 1.100.0 --profile minimal --component rustfmt --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          rustc --version
+      - name: Set up generated demo tools
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SOUNDWAIVE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "::error::SOUNDWAIVE_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          chmod 600 "$RUNNER_TEMP/release.jks"
+      - name: Build signed release packages
+        env:
+          SOUNDWAIVE_STORE_PASSWORD: ${{ secrets.SOUNDWAIVE_STORE_PASSWORD }}
+          SOUNDWAIVE_KEY_ALIAS: ${{ secrets.SOUNDWAIVE_KEY_ALIAS }}
+          SOUNDWAIVE_KEY_PASSWORD: ${{ secrets.SOUNDWAIVE_KEY_PASSWORD }}
+        run: |
+          export SOUNDWAIVE_KEYSTORE="$RUNNER_TEMP/release.jks"
+          ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease
+      - name: Verify signatures and collect packages
+        run: |
+          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          jarsigner -verify "$AAB" | tail -n 1
+          mkdir -p release
+          cp "$APK" "release/SoundWaive-${RELEASE_TAG}-beta.apk"
+          cp "$AAB" "release/SoundWaive-${RELEASE_TAG}-beta.aab"
+          (cd release && sha256sum SoundWaive-* > SHA256SUMS.txt)
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            printf '**Beta.** This is a beta build.\n\n'
+            printf 'SoundWaive releases December 3rd for $14.99 on all devices.\n\n'
+            cat RELEASE_NOTES.md
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$RELEASE_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease \
+            --title 'SoundWaive Beta v1.14' \
+            --notes-file "$RUNNER_TEMP/release-notes.md"

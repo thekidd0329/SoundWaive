@@ -843,6 +843,9 @@ class VisualRenderer(context: Context) {
                 flow * s.f("spin") * .15f
         var size = 690 * (.83f + .18f * bass + .22f * kick * s.f("zoom")) * s.f("scale")
         if (md == 2) size *= .89f
+        // Release Pack reframing: in a frame shorter than it is wide the symbol and everything
+        // sized from it shrink to stay inside the frame (16:9 is 1080 x 608 here).
+        if (s.b("fitSymbolToFrame")) size *= BackgroundMath.symbolFit(h)
         if (s.s("preset") == "Original crown" && t in 148f..160f) size *= .83f
         for (j in tunnel downTo 1) {
             val q = j.toFloat() / tunnel

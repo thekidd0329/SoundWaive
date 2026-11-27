@@ -107,6 +107,14 @@ object BackgroundMath {
         return floatArrayOf((dstW - w) / 2, (dstH - h) / 2, (dstW + w) / 2, (dstH + h) / 2)
     }
 
+    /**
+     * Symbol scale for a frame [height] units tall in the renderer's 1080-unit-wide space.
+     * Looks are designed for frames at least as tall as they are wide (9:16, 4:5, 1:1); a
+     * wider frame scales the symbol by its height so it stays centred and uncropped.
+     */
+    fun symbolFit(height: Float): Float =
+        if (height.isFinite() && height > 0f) (height / 1080f).coerceIn(.25f, 1f) else 1f
+
     /** Subtle bass zoom: at most +4% at full bass. */
     fun pulseZoom(bass: Float): Float = 1f + .04f * bass.coerceIn(0f, 1f)
 

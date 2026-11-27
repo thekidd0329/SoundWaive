@@ -75,33 +75,214 @@ class ExportService : Service() {
             }
         }
         ExportSession.listen(onStatus)
+        try {
+            if (job.pack) runPack(job) else runSingle(job)
+        } finally {
+            ExportSession.stopListening(onStatus)
+            stopAndRelease()
+        }
+    }
+
+    /** One video to the file the user picked. */
+    private fun runSingle(job: ExportJob) {
+        val output = job.output
+        if (output == null) {
+            ExportSession.fail("The export could not start.")
+            return
+        }
+        try {
+            val ready = decoded(job, .08f)
+            val rendered =
+                render(job, ready, job.settings, VideoExporter.Options()) { label, value ->
+                    ExportSession.progress(label, value)
+                }
+            val result = rendered.result
+            if (ExportSession.cancel.get()) throw InterruptedException("Canceled")
+            contentResolver.openOutputStream(output, "w")!!.use { out ->
+                result.file.inputStream().use { it.copyTo(out) }
+            }
+            result.file.delete()
+            ExportSession.finish(
+                output,
+                result.width,
+                result.height,
+                result.duration,
+                result.notice,
+                rendered.aiLine,
+            )
+            notifyDone("Your video is ready", "Tap to open SoundWaive")
+        } catch (e: InterruptedException) {
+            try {
+                android.provider.DocumentsContract.deleteDocument(contentResolver, output)
+            } catch (_: Exception) {}
+            ExportSession.canceled()
+            if (ExportSession.status is ExportStatus.Failed) {
+                notifyDone("Export stopped", ExportSession.TIMEOUT_MESSAGE)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Export failed", e)
+            try {
+                android.provider.DocumentsContract.deleteDocument(contentResolver, output)
+            } catch (_: Exception) {}
+            val message = e.message ?: "Please try again."
+            ExportSession.fail(message)
+            notifyDone("Couldn’t finish the export", message)
+        }
+    }
+
+    /**
+     * Release Pack: one analysis, seven renders in a row (see [ReleasePlan] for the windows),
+     * each saved to Movies/SoundWaive/<song>/ as soon as it is done. A clip that fails is
+     * reported and the rest still render. Cancel keeps the clips already saved.
+     */
+    private fun runPack(job: ExportJob) {
+        val folder = ReleasePack.songName(job.track.name)
+        val results = ArrayList<PackResult>()
+        val problems = ArrayList<String>()
+        val notes = LinkedHashSet<String>()
+        try {
+            val ready = decoded(job, .03f)
+            val look = job.settings
+            val fps = ReleasePack.fps(look)
+            var youTube = 1920 to 1080
+            if (ReleasePack.wants4k(look)) {
+                val bitrate = ReleasePack.youTubeBitrate(2160, fps, look)
+                if (VideoExporter().canEncode(3840, 2160, fps, bitrate)) youTube = 3840 to 2160
+                else
+                    notes +=
+                        "This phone’s video encoder can’t make 4K at $fps fps, so the YouTube video is 1080p."
+            }
+            val plan =
+                ReleasePlan.plan(
+                    ReleasePack.song(ready.analysis, look),
+                    youTube,
+                    ReleasePack.squareSeconds(look),
+                )
+            for (item in plan)
+                Log.i(
+                    TAG,
+                    "Release Pack ${item.kind}: ${item.window.start}–${item.window.end} s, " +
+                        "${item.width}x${item.height} (${item.why})",
+                )
+            val costs = plan.map { ReleasePack.cost(it) }
+            val total = costs.sum().coerceAtLeast(1.0)
+            var done = 0.0
+            for ((i, item) in plan.withIndex()) {
+                if (ExportSession.cancel.get()) throw InterruptedException("Canceled")
+                val base = .03f + .97f * (done / total).toFloat()
+                val share = .97f * (costs[i] / total).toFloat()
+                val prefix = "${i + 1} of ${plan.size} · ${item.kind.label}"
+                ExportSession.progress(prefix, base)
+                try {
+                    val rendered =
+                        render(
+                            job,
+                            ready,
+                            ReleasePack.settingsFor(look, item),
+                            ReleasePack.optionsFor(look, item),
+                        ) { label, value ->
+                            ExportSession.progress("$prefix · $label", base + share * value)
+                        }
+                    val file = rendered.result.file
+                    try {
+                        if (ExportSession.cancel.get()) throw InterruptedException("Canceled")
+                        val name = ReleasePack.fileName(folder, item)
+                        val uri = ReleasePack.save(this, file, folder, name)
+                        results +=
+                            PackResult(
+                                label = item.kind.label,
+                                fileName = name,
+                                uri = uri,
+                                width = rendered.result.width,
+                                height = rendered.result.height,
+                                duration = rendered.result.duration,
+                                start = item.window.start,
+                                silent = !item.audio,
+                            )
+                    } finally {
+                        file.delete()
+                    }
+                    rendered.result.notice?.let { notes += it }
+                    rendered.aiLine?.let { notes += it }
+                } catch (e: InterruptedException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "Release Pack ${item.kind} failed", e)
+                    problems += "${item.kind.label}: ${e.message ?: "couldn’t render"}"
+                }
+                done += costs[i]
+            }
+            ExportSession.finishPack(folder, results, problems, notes.toList(), false)
+            notifyDone(
+                if (problems.isEmpty()) "Your Release Pack is ready"
+                else "Release Pack finished with problems",
+                "${results.size} videos in Movies/SoundWaive/$folder",
+            )
+        } catch (e: InterruptedException) {
+            if (ExportSession.timedOut) problems += ExportSession.TIMEOUT_MESSAGE
+            ExportSession.finishPack(folder, results, problems, notes.toList(), true)
+            notifyDone(
+                "Release Pack stopped",
+                "${results.size} finished videos kept in Movies/SoundWaive/$folder",
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Release Pack failed", e)
+            if (results.isEmpty()) {
+                val message = e.message ?: "Please try again."
+                ExportSession.fail(message)
+                notifyDone("Couldn’t make the Release Pack", message)
+            } else {
+                problems += e.message ?: "The Release Pack stopped early."
+                ExportSession.finishPack(folder, results, problems, notes.toList(), true)
+                notifyDone("Release Pack stopped", "${results.size} finished videos kept")
+            }
+        }
+    }
+
+    /** The song decoded to PCM once per job; [share] of the progress bar while it runs. */
+    private fun decoded(job: ExportJob, share: Float): Track {
+        var ready = job.track
+        if (ready.pcm == null) {
+            val decoded =
+                AudioEngine(this).decode(ready.uri, ready.name, ExportSession.cancel) {
+                    label,
+                    value ->
+                    ExportSession.progress(label, value * share)
+                }
+            ready = decoded.copy(analysis = ready.analysis)
+            job.track = ready
+        }
+        return ready
+    }
+
+    private class Rendered(val result: VideoExporter.Result, val aiLine: String?)
+
+    /**
+     * Renders [snapshot] to a temporary MP4: opens the background at this output's size, adds
+     * AI sharpening to a video background when it helps, and runs [VideoExporter].
+     */
+    private fun render(
+        job: ExportJob,
+        ready: Track,
+        snapshot: Settings,
+        options: VideoExporter.Options,
+        progress: (String, Float) -> Unit,
+    ): Rendered {
+        val engine = VisualRenderer(this)
+        engine.artwork = job.artwork
+        engine.backdrop = job.backdrop
+        val (outW, outH) = VideoExporter().dimensions(snapshot, options)
+        val photo = job.photo
+        var aiChip: String? =
+            if (
+                snapshot.s("backgroundType") == BackgroundMath.PHOTO &&
+                    photo != null &&
+                    photo === job.aiPhoto
+            )
+                job.aiPhotoChip
+            else null
         var exportBackground: BackgroundSource? = null
         try {
-            var ready = job.track
-            if (ready.pcm == null) {
-                val decoded =
-                    AudioEngine(this).decode(ready.uri, ready.name, ExportSession.cancel) {
-                        label,
-                        value ->
-                        ExportSession.progress(label, value * .08f)
-                    }
-                ready = decoded.copy(analysis = ready.analysis)
-                job.track = ready
-            }
-            val engine = VisualRenderer(this)
-            engine.artwork = job.artwork
-            engine.backdrop = job.backdrop
-            val snapshot = job.settings
-            val (outW, outH) = VideoExporter().dimensions(snapshot)
-            val photo = job.photo
-            var aiChip: String? =
-                if (
-                    snapshot.s("backgroundType") == BackgroundMath.PHOTO &&
-                        photo != null &&
-                        photo === job.aiPhoto
-                )
-                    job.aiPhotoChip
-                else null
             exportBackground =
                 try {
                     BackgroundMedia.open(
@@ -125,7 +306,7 @@ class ExportService : Service() {
                             ?: Int.MAX_VALUE,
                     )
                 if (min(opened.size.width, opened.size.height) < target) {
-                    ExportSession.progress("Getting the AI sharpening ready", .09f)
+                    progress("Getting the AI sharpening ready", .09f)
                     val ai =
                         try {
                             AiUpscaler.get(this)
@@ -154,55 +335,25 @@ class ExportService : Service() {
             }
             engine.background = exportBackground
             val result =
-                VideoExporter().export(
-                    ready,
-                    snapshot,
-                    engine,
-                    File(cacheDir, "exports"),
-                    ExportSession.cancel,
-                ) { label, value ->
-                    ExportSession.progress(label, value)
-                }
-            if (ExportSession.cancel.get()) throw InterruptedException("Canceled")
-            contentResolver.openOutputStream(job.output, "w")!!.use { out ->
-                result.file.inputStream().use { it.copyTo(out) }
-            }
-            result.file.delete()
+                VideoExporter()
+                    .export(
+                        ready,
+                        snapshot,
+                        engine,
+                        File(cacheDir, "exports"),
+                        ExportSession.cancel,
+                        options,
+                        progress,
+                    )
             val usedAi = aiChip != null && (aiVideo == null || aiVideo.improved > 0)
             val aiLine = if (usedAi) "Background sharpened by AI on the $aiChip." else null
-            ExportSession.finish(
-                job.output,
-                result.width,
-                result.height,
-                result.duration,
-                result.notice,
-                aiLine,
-            )
-            notifyDone("Your video is ready", "Tap to open SoundWaive")
-        } catch (e: InterruptedException) {
-            try {
-                android.provider.DocumentsContract.deleteDocument(contentResolver, job.output)
-            } catch (_: Exception) {}
-            ExportSession.canceled()
-            if (ExportSession.status is ExportStatus.Failed) {
-                notifyDone("Export stopped", ExportSession.TIMEOUT_MESSAGE)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Export failed", e)
-            try {
-                android.provider.DocumentsContract.deleteDocument(contentResolver, job.output)
-            } catch (_: Exception) {}
-            val message = e.message ?: "Please try again."
-            ExportSession.fail(message)
-            notifyDone("Couldn’t finish the export", message)
+            return Rendered(result, aiLine)
         } finally {
             try {
                 exportBackground?.release()
             } catch (e: Exception) {
                 Log.w(TAG, "Export background release failed", e)
             }
-            ExportSession.stopListening(onStatus)
-            stopAndRelease()
         }
     }
 
@@ -242,7 +393,11 @@ class ExportService : Service() {
     private fun progressNotification(state: ExportStatus): Notification {
         val running = state as? ExportStatus.Running
         val percent = ((running?.progress ?: 0f) * 100).toInt().coerceIn(0, 100)
-        val text = if (running == null || percent <= 0) "Preparing export" else "$percent%"
+        val pack = ExportSession.job?.pack == true
+        val text =
+            if (running == null || percent <= 0) "Preparing export"
+            else if (pack) "$percent% · ${running.label.substringBeforeLast(" · Rendering")}"
+            else "$percent%"
         val cancel =
             PendingIntent.getService(
                 this,
@@ -252,7 +407,7 @@ class ExportService : Service() {
             )
         return Notification.Builder(this, CHANNEL_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_export)
-            .setContentTitle("Exporting video")
+            .setContentTitle(if (pack) "Rendering Release Pack" else "Exporting video")
             .setContentText(text)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
