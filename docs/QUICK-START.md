@@ -1,6 +1,6 @@
 # SoundWaive — your music, your visual
 
-Install **SoundWaive-Android.apk** on your Android phone. Android may ask you to allow installation from your browser or Files app. The app works offline on Android 12 or newer (64-bit phones; it is built for Pixel).
+Install **SoundWaive-dev.apk** from the GitHub build on your Android phone or tablet. Android may ask you to allow installation from your browser or Files app. The app works offline on Android 8.0 and newer, on ARM and Intel devices.
 
 ## Make a video
 
@@ -8,7 +8,7 @@ Install **SoundWaive-Android.apk** on your Android phone. Android may ask you to
 2. Tap **Import music** to choose your FLAC or another audio file that Android supports. Wait for the beat and bass-note analysis.
 3. Press **Play**. Choose a preset in **Studio**, then customize **Look** and **Motion**. Tap the expand button for a full-screen preview.
 4. In **Export**, choose the shape, resolution, frame rate and quality. Leave the end time at **0** to include the whole song.
-5. Tap **Export video**, choose a location in Files, and allow notifications if Android asks. You can leave the app; a notification shows the percentage until it finishes. The MP4 includes your music. You can play or share it from the app.
+5. Tap **Export video**, choose a location in Files, and allow notifications if Android asks. You can leave the app; a notification shows the percentage until it finishes. SoundWaive reports the actual video settings if your encoder requires a smaller size, frame rate or bitrate. The MP4 includes your music. You can play or share it from the app.
 
 ## Keep it fresh
 
@@ -32,7 +32,7 @@ Transparent PNGs work best for custom symbols. Disable **Tint imported artwork**
 
 ## Practical notes
 
-- The app is under 10 MB. Imported audio caches and exported videos use additional storage. A four-minute video at 12 Mbps is roughly 370 MB.
+- Imported audio caches and exported videos use additional storage. A four-minute video at 12 Mbps is roughly 370 MB.
 - Music stays on your device. There is no account, upload, subscription or Internet permission.
 - Beat timing, energy and approximate bass pitches come from local analysis. The flying notes are expressive animation, not verified sheet music.
 - Mono/stereo tracks up to 30 minutes are supported. Codec availability and export speed depend on the phone. If a size/frame-rate combination is unsupported, try 720p at 30 fps.

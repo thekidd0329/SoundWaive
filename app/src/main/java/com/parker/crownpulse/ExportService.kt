@@ -151,7 +151,7 @@ class ExportService : Service() {
             var youTube = 1920 to 1080
             if (ReleasePack.wants4k(look)) {
                 val bitrate = ReleasePack.youTubeBitrate(2160, fps, look)
-                if (VideoExporter().canEncode(3840, 2160, fps, bitrate)) youTube = 3840 to 2160
+                if (VideoExporter(this).canEncode(3840, 2160, fps, bitrate)) youTube = 3840 to 2160
                 else
                     notes +=
                         "This phone’s video encoder can’t make 4K at $fps fps, so the YouTube video is 1080p."
@@ -275,7 +275,7 @@ class ExportService : Service() {
         val engine = VisualRenderer(this)
         engine.artwork = job.artwork
         engine.backdrop = job.backdrop
-        val (outW, outH) = VideoExporter().dimensions(snapshot, options)
+        val (outW, outH) = VideoExporter(this).dimensions(snapshot, options)
         val photo = job.photo
         var aiChip: String? =
             if (
@@ -339,7 +339,7 @@ class ExportService : Service() {
             }
             engine.background = exportBackground
             val result =
-                VideoExporter()
+                VideoExporter(this)
                     .export(
                         ready,
                         snapshot,

@@ -1,14 +1,14 @@
-# AI background sharpening (1.13.0)
+# AI background sharpening
 
-The **Sharpen & clean up background (AI)** switch runs Real-ESRGAN-General-x4v3 on background photos and videos. It is a 4x super-resolution model trained on noisy, compressed pictures, so it also cleans up noise and compression blocks. It runs through LiteRT 2.3.0's `CompiledModel` API (`AiUpscale.kt`).
+The **Sharpen & clean up background (AI)** switch runs Real-ESRGAN-General-x4v3 on background photos and videos. It is a 4x super-resolution model trained on noisy, compressed pictures, so it also cleans up noise and compression blocks. ARM and 64-bit Intel use LiteRT 2.3.0’s `CompiledModel` API. On 32-bit Intel the same offline model runs through the LiteRT 1.4.2 C interpreter when SSE4.1 is available. Earlier Intel processors keep the original background and can use the editor and exporter.
 
 ## Which chip
 
-1. **TPU (Tensor G5 NPU).** Used only when `app/src/main/assets/models/real_esrgan_general_x4v3_Google_Tensor_G5.tflite` exists. The Google Tensor SDK has no on-device (JIT) compilation, so the model must be compiled ahead of time by `scripts/aot_compile_g5.py`. The app times one tile at startup. If it is slower than 150 ms, the "NPU" run has silently fallen back to the CPU, and the app moves on to the GPU.
+1. **TPU (Tensor G5 NPU).** Requires a compatible Tensor G5 and the compiled asset at `app/src/main/assets/models/real_esrgan_general_x4v3_Google_Tensor_G5.tflite`. The Google Tensor SDK has no on-device (JIT) compilation, so the model must be compiled ahead of time by `scripts/aot_compile_g5.py`. The app times one tile at startup. If it is slower than 150 ms, the "NPU" run has silently fallen back to the CPU, and the app moves on to the GPU.
 2. **GPU.** The bundled `real_esrgan_general_x4v3.tflite` through `litert-gpu`.
 3. **CPU.** The same file, as a last resort.
 
-The chip used is logged (`adb logcat -s SoundWaive`) and named in the export-ready box ("Background sharpened by AI on the TPU/GPU/CPU."). If no chip can load the model, the effect is skipped with a log line, and exports are unaffected.
+Model creation and inference for both photos and videos run on one dedicated thread to preserve the GPU context. The chip used is logged (`adb logcat -s SoundWaive`) and named in the export-ready box ("Background sharpened by AI on the TPU/GPU/CPU."). If no chip can load the model, the effect is skipped with a log line, and exports are unaffected.
 
 ## What it does
 
@@ -32,4 +32,4 @@ Then rebuild and reinstall. The report should say every op was offloaded ("fully
 - **`GOOGLE_TENSOR_BACKEND_ENABLED=1`.** Stable Python packages only register the Google Tensor backend with this set. Without it, compiling fails with `Unsupported backend id: GOOGLE`.
 - **Kotlin metadata.** LiteRT 2.3.0's Kotlin API is compiled with metadata 2.4. Android Gradle Plugin 9.4 ships Kotlin 2.2, which can only read metadata up to 2.3, so `app/build.gradle.kts` passes `-Xskip-metadata-version-check` (same flag as Google's LiteRT samples).
 - **edgetpu_app_service error 16.** The Tensor TPU service rejects apps that are not on its allowlist, which is tied to the package name and signing certificate. The NPU load then fails with this error, and the app falls back to the GPU. The beta allowlist is per package and signature, so the debug build (`com.parker.crownpulse.debug`, debug key) and the release build count as different apps. Register the one you install.
-- **Android 12+ and arm64 only.** NPU support needs API 31, so the app's minSdk is now 31 and it ships arm64-v8a only. Native libraries are extracted (`useLegacyPackaging`) so the dispatch library can be found on disk, and `.tflite` assets are stored uncompressed.
+- **Packaging.** The universal APK includes the Rust engine for all four Android ABIs. The Tensor dispatch libraries are optional ARM64 dependencies. Native libraries are extracted so Tensor can locate its dispatch library. The bundled models are stored uncompressed.

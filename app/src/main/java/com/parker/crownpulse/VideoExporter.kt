@@ -1,5 +1,6 @@
 package com.parker.crownpulse
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.SurfaceTexture
@@ -15,7 +16,7 @@ import java.nio.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.*
 
-class VideoExporter {
+class VideoExporter(private val context: Context) {
     data class Result(
         val file: File,
         val width: Int,
@@ -187,49 +188,19 @@ class VideoExporter {
                 ae.selectTrack(0)
                 af = ae.getTrackFormat(0)
             }
-            val (w, h) = dimensions(s, options)
-            val fps = if (options.fps > 0) options.fps else s.s("fps").toIntOrNull() ?: 30
+            val (requestedW, requestedH) = dimensions(s, options)
+            val requestedFps = if (options.fps > 0) options.fps else s.s("fps").toIntOrNull() ?: 30
             val bitrate =
                 if (options.bitrate > 0) options.bitrate
                 else (s.s("bitrate").substringBefore(' ').toIntOrNull() ?: 12) * 1_000_000
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h)
-            format.setInteger(
-                MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
-            )
-            format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-            format.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-            format.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-            format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
-            format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-            val codecs = MediaCodecList(MediaCodecList.REGULAR_CODECS)
-            var name = codecs.findEncoderForFormat(format)
-            var rotated = false
-            if (name == null && w != h) {
-                // Some encoders accept the same pixels only in landscape order.
-                // Rotate the texture and tag the MP4; preserve the requested display size.
-                format.setInteger(MediaFormat.KEY_WIDTH, h)
-                format.setInteger(MediaFormat.KEY_HEIGHT, w)
-                name = codecs.findEncoderForFormat(format)
-                rotated = name != null
-            }
-            if (name == null)
-                throw IllegalStateException(
-                    "This phone cannot export this size and frame rate. Try 720p at 30 fps."
-                )
-            // H.264 High profile when the encoder lists it (better quality per bit than the
-            // Baseline/Main default); the level is the encoder's highest for High, an upper
-            // bound it picks below. If the encoder still refuses, configure without it.
-            val high = highProfileLevel(codecs, name)
-            if (high != null) {
-                format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-                format.setInteger(MediaFormat.KEY_LEVEL, high)
-            }
-            codec = openEncoder(name, format, high != null)
-            surface = codec.createInputSurface()
+            val selected = AvcEncoder.open(requestedW, requestedH, requestedFps, bitrate)
+            codec = selected.codec
+            surface = selected.surface
+            val w = selected.width
+            val h = selected.height
+            val fps = selected.fps
+            val rotated = selected.rotated
             egl = EncoderSurface(surface, if (rotated) h else w, if (rotated) w else h, rotated)
-            codec.start()
             mux = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             if (rotated) mux.setOrientationHint(90)
             val audioIndex = if (af != null) mux.addTrack(af) else -1
@@ -427,7 +398,8 @@ class VideoExporter {
             success = true
             progress("Video ready", 1f)
             val seconds = if (loop) total / fps.toFloat() else end - start
-            return Result(output, w, h, total, seconds, notice)
+            val details = listOfNotNull(selected.notice, notice).joinToString(" ").ifEmpty { null }
+            return Result(output, w, h, total, seconds, details)
         } finally {
             // GL objects first, while the encoder's context is still current.
             try {
@@ -466,38 +438,68 @@ class VideoExporter {
         fadeOut: Float = 0f,
         progress: (Float) -> Unit,
     ): Int {
-        // The standard Android AAC-LC encoders use 2048 priming samples.
-        // Use the same implementation across phones for deterministic audio timing.
-        val available = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
-        val name =
-            listOf("c2.android.aac.encoder", "OMX.google.aac.encoder").firstOrNull { wanted ->
-                available.any { it.name == wanted && it.isEncoder }
+        val reference = listOf("c2.android.aac.encoder", "OMX.google.aac.encoder")
+        val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { it.isEncoder && MediaFormat.MIMETYPE_AUDIO_AAC in it.supportedTypes }
+            .sortedBy { reference.indexOf(it.name).let { rank -> if (rank < 0) reference.size else rank } }
+        for (encoder in encoders) {
+            val caps = encoder.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, track.rate, track.channels)
+            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            val preferredRate = if (track.channels == 2) 320000 else 160000
+            format.setInteger(MediaFormat.KEY_BIT_RATE, caps.audioCapabilities.bitrateRange.clamp(preferredRate))
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+            if (!caps.isFormatSupported(format)) continue
+            val vendor = encoder.name !in reference
+            fun startCodec(): MediaCodec {
+                val codec = MediaCodec.createByCodecName(encoder.name)
+                try {
+                    codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    codec.start()
+                    return codec
+                } catch (e: Exception) {
+                    codec.release()
+                    throw e
+                }
             }
-                ?: throw IllegalStateException(
-                    "This device does not provide the standard Android AAC encoder."
-                )
-        val encoderDelay = 2048
-        val codec = MediaCodec.createByCodecName(name)
-        val f =
-            MediaFormat.createAudioFormat(
-                MediaFormat.MIMETYPE_AUDIO_AAC,
-                track.rate,
-                track.channels,
-            )
-        f.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-        f.setInteger(MediaFormat.KEY_BIT_RATE, if (track.channels == 2) 320000 else 160000)
-        f.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
-        codec.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
+            // The reference encoder's priming is verified by the existing audio timing fixtures.
+            val delay = if (vendor) {
+                try {
+                    AacTimingProbe.measure(context, track, checkNotNull(out.parentFile), cancel) { probe, duration, file ->
+                        writeAac(startCodec(), probe, 0f, duration, file, 4096, true, cancel, 0f, 0f) {}
+                    }
+                } catch (e: InterruptedException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not calibrate ${encoder.name}", e)
+                    continue
+                }
+            } else 2048
+            val codec = try { startCodec() } catch (e: Exception) {
+                Log.w(TAG, "Cannot start ${encoder.name}", e)
+                continue
+            }
+            writeAac(codec, track, start, end, out, delay, vendor, cancel, fadeIn, fadeOut, progress)
+            return delay
+        }
+        throw IOException("This device has no usable AAC-LC encoder for ${track.rate} Hz, ${track.channels} channel(s).")
+    }
+
+    private fun writeAac(
+        codec: MediaCodec, track: Track, start: Float, end: Float, out: File,
+        padding: Int, vendor: Boolean, cancel: AtomicBoolean,
+        fadeIn: Float, fadeOut: Float, progress: (Float) -> Unit,
+    ) {
         var mux: MediaMuxer? = null
         var started = false
         try {
             mux = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             var trackIndex = -1
+            var firstPts: Long? = null
             val bytesPerFrame = track.channels * 2
             val frames = ((end - start) * track.rate).toLong()
             val sourceBytes = frames * bytesPerFrame
-            val total = ((frames + encoderDelay + 1023) / 1024) * 1024 * bytesPerFrame
+            val total = ((frames + padding + 1023) / 1024) * 1024 * bytesPerFrame
             var read = 0L
             var inputDone = false
             var outputDone = false
@@ -525,15 +527,7 @@ class VideoExporter {
                                             .toInt()
                                     if (fromSource > 0) file.readFully(temp, 0, fromSource)
                                     if (fromSource > 0 && (fadeInFrames > 0 || fadeOutFrames > 0))
-                                        applyFades(
-                                            temp,
-                                            fromSource,
-                                            track.channels,
-                                            read / bytesPerFrame,
-                                            frames,
-                                            fadeInFrames,
-                                            fadeOutFrames,
-                                        )
+                                        applyFades(temp, fromSource, track.channels, read / bytesPerFrame, frames, fadeInFrames, fadeOutFrames)
                                     amount
                                 } else -1
                             val pts = (read / bytesPerFrame) * 1_000_000L / track.rate
@@ -556,7 +550,15 @@ class VideoExporter {
                     }
                     when (val ix = codec.dequeueOutputBuffer(info, 10000)) {
                         MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            trackIndex = mux.addTrack(codec.outputFormat)
+                            val format = codec.outputFormat
+                            // Use raw AAC timing for both calibration and export. The final MP4
+                            // receives exactly one edit for the measured delay.
+                            val audioFormat = if (vendor) {
+                                MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, track.rate, track.channels).apply {
+                                    setByteBuffer("csd-0", checkNotNull(format.getByteBuffer("csd-0")))
+                                }
+                            } else format
+                            trackIndex = mux.addTrack(audioFormat)
                             mux.start()
                             started = true
                         }
@@ -569,6 +571,10 @@ class VideoExporter {
                                     check(started)
                                     b.position(info.offset)
                                     b.limit(info.offset + info.size)
+                                    if (vendor) {
+                                        val origin = firstPts ?: info.presentationTimeUs.also { firstPts = it }
+                                        info.presentationTimeUs -= origin
+                                    }
                                     mux.writeSampleData(trackIndex, b, info)
                                 }
                                 outputDone =
@@ -580,7 +586,6 @@ class VideoExporter {
             }
             mux.stop()
             started = false
-            return encoderDelay
         } finally {
             try {
                 codec.stop()

@@ -8,7 +8,8 @@
 | Gradle wrapper | 9.6.1, SHA-256 verified |
 | Android Gradle Plugin | 9.4.0, built-in Kotlin |
 | Android compile/target SDK | 35 |
-| Android minimum SDK | 26 |
+| Android minimum SDK | 26 (Android 8.0) |
+| Packaged ABIs | `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64` |
 | Android build tools | 36.0.0 |
 | Android NDK | 28.2.13676358 |
 | Rust | 1.100.0, recorded in rust-toolchain.toml |
@@ -25,7 +26,7 @@ Accept Android SDK licenses if prompted. Set `ANDROID_HOME` or `ANDROID_SDK_ROOT
 ./gradlew --no-daemon check :app:assembleDebug
 ```
 
-`check` runs the four Rust tests, Rust formatting verification, four JVM MP4 timing tests, Android lint, and bundled-asset SHA-256 checks. Native libraries are compiled from source before Android packaging. Cargo uses `--locked` and the committed lockfile.
+`check` runs the Rust and JVM regression suites, Rust formatting verification, Android lint, and bundled-asset SHA-256 checks. Native libraries are compiled from source before Android packaging. Cargo uses `--locked` and the committed lockfile.
 
 Outputs:
 
@@ -71,7 +72,9 @@ cargo test --locked --manifest-path engine/Cargo.toml
 
 After deliberately changing bundled artwork, update its line in `assets.sha256` with the new SHA-256 and review that change alongside the asset. The build rejects missing or corrupted media. Build directories, local SDK settings, generated packages and signing files are ignored by Git.
 
-The optional `qa/` instrumentation uses private emulator fixtures and is not shipped in release builds. Its original reproduction procedure is documented there. Hardware testing and representative full-song exports are still needed before broader distribution.
+With an Android device or emulator attached, run `./gradlew :app:connectedDebugAndroidTest` to exercise offline sharpening, AAC timing, and background MP4 export using bundled audio.
+
+The older optional `qa/` instrumentation uses private emulator fixtures and is not shipped in release builds. Its original reproduction procedure is documented there. Hardware testing and representative full-song exports are still needed before broader distribution.
 
 ## Generated demo
 

@@ -36,7 +36,13 @@ jobs:
       - name: Set up generated demo tools
         run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Run checks and build Android packages
-        run: ./gradlew --no-daemon check :app:assembleDebug :app:assembleRelease :app:bundleRelease
+        run: ./gradlew --no-daemon check :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:bundleRelease
+      - name: Verify packaged native architectures
+        run: |
+          python3 qa/verify_android_packages.py \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            app/build/outputs/bundle/release/app-release.aab
       - name: Collect build outputs
         run: |
           mkdir -p artifacts

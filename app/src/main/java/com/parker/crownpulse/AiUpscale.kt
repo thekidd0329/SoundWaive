@@ -72,7 +72,10 @@ private constructor(
         if (input !== source) input.recycle()
         val outW = w * SCALE
         val outH = h * SCALE
-        val out = IntArray(outW * outH)
+        // Write each tile into the bitmap once. A second full-size ARGB array can
+        // exhaust the heap on 32-bit phones before the final downscale.
+        val big = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        val patch = IntArray(CORE * SCALE * CORE * SCALE)
         var cy = 0
         while (cy < h) {
             var cx = 0
@@ -99,21 +102,21 @@ private constructor(
                 val y1 = min(cy + CORE, h) * SCALE
                 for (y in y0 until y1) {
                     val tileRow = (y - oy * SCALE) * OUT
-                    val outRow = y * outW
+                    val outRow = (y - y0) * (x1 - x0)
                     for (x in x0 until x1) {
                         val j = (tileRow + x - ox * SCALE) * 3
-                        out[outRow + x] =
+                        patch[outRow + x - x0] =
                             (0xff shl 24) or
                                 (channel(result[j]) shl 16) or
                                 (channel(result[j + 1]) shl 8) or
                                 channel(result[j + 2])
                     }
                 }
+                big.setPixels(patch, 0, x1 - x0, x0, y0, x1 - x0, y1 - y0)
                 cx += CORE
             }
             cy += CORE
         }
-        val big = Bitmap.createBitmap(out, outW, outH, Bitmap.Config.ARGB_8888)
         val bigShort = min(outW, outH)
         if (bigShort <= targetShort) return big
         val scaled =
@@ -150,6 +153,9 @@ private constructor(
         private var tried = false
 
         private fun <T> onModelThread(block: () -> T): T = worker.submit(Callable(block)).get()
+
+        fun supportsModel(): Boolean =
+            Process.is64Bit() || !X86TileInterpreter.available || X86TileInterpreter.supportsModel()
 
         /** The loaded upscaler, loading it on first use; null if no chip could run it. */
         fun get(context: Context): AiUpscaler? = onModelThread {
@@ -229,7 +235,9 @@ private constructor(
             }
             // The bridge can load only in a 32-bit Intel process, including from an ABI split.
             if (!Process.is64Bit() && X86TileInterpreter.available) {
-                return openX86(context)
+                if (X86TileInterpreter.supportsModel()) return openX86(context)
+                Log.i(TAG, "AI sharpening requires SSE4.1 on 32-bit Intel")
+                return null
             }
             return attempt(context, MODEL, Accelerator.GPU, "GPU", npu = false)
                 ?: attempt(context, MODEL, Accelerator.CPU, "CPU", npu = false)

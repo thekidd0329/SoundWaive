@@ -21,7 +21,7 @@ object AudioTimingCheck {
         for ((name, start, end) in
             listOf(Triple("portrait", 30f, 32f), Triple("landscape", 90f, 91f))) {
             val audio = File(dir, "fixed-audio.m4a")
-            val delay = VideoExporter().encodeAudio(track, start, end, audio, cancel) { _ -> }
+            val delay = VideoExporter(ctx).encodeAudio(track, start, end, audio, cancel) { _ -> }
             val old = File(dir, "independent-$name.mp4")
             val next = File(dir, "corrected-$name.mp4")
             val ve = MediaExtractor()
@@ -62,7 +62,7 @@ object AudioTimingCheck {
         }
         val mono = track.copy(pcm = File(ctx.filesDir, "qa48.pcm"), rate = 48000, channels = 1)
         val m4a = File(dir, "48k-mono.m4a")
-        val delay = VideoExporter().encodeAudio(mono, 0f, 1f, m4a, cancel) { _ -> }
+        val delay = VideoExporter(ctx).encodeAudio(mono, 0f, 1f, m4a, cancel) { _ -> }
         Mp4AudioTiming.apply(m4a, delay, 48000, 48000)
         val roundtrip =
             AudioEngine(ctx).decode(
