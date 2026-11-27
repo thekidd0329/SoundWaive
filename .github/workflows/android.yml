@@ -106,6 +106,8 @@ jobs:
           export ANDROID_USER_HOME="$RUNNER_TEMP/soundwaive-android"
           export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME" ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
           mkdir -p "$ANDROID_AVD_HOME"
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager  "emulator" "platform-tools" "platforms;android-${{ matrix.api }}" "$IMAGE"
           echo no | avdmanager create avd --name soundwaive --path "$ANDROID_AVD_HOME/soundwaive.avd" --package "$IMAGE" --device "Nexus 5X"
           emulator -list-avds | grep -Fx soundwaive
           emulator @soundwaive -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on -partition-size 1024 > emulator.log 2>&1 &
