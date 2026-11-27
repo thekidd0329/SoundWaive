@@ -103,7 +103,11 @@ jobs:
           sudo chown "$(id -un)" /dev/kvm
           sdkmanager "emulator" "platform-tools" "$IMAGE"
           emulator -accel-check
-          echo no | avdmanager create avd --name soundwaive --package "$IMAGE" --device "Nexus 5X"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/soundwaive-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME" ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --name soundwaive --path "$ANDROID_AVD_HOME/soundwaive.avd" --package "$IMAGE" --device "Nexus 5X"
+          emulator -list-avds | grep -Fx soundwaive
           emulator @soundwaive -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on -partition-size 1024 > emulator.log 2>&1 &
           emulator_pid=$!
           trap 'timeout 10 adb logcat -d > logcat.txt 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
