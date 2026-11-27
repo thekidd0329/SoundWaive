@@ -3,13 +3,14 @@
 ## 1.17.5 — Cache cleanup
 
 **What's new**
-- **The app no longer keeps growing as you export.** Temporary files from AI-sharpened video backgrounds, leftover export scratch and unused imported-audio copies are removed when an export finishes and when you open the app.
-- **Clear cache** is on the Export screen, under Storage. It shows how much space the cache is using. It does not remove saved looks, artwork, backgrounds or the demo.
+- **Clear cache** is on the Export screen, under Storage. It shows how much temporary cache the app is using (imported audio you are not listening to, export scratch and AI video frames) and lets you free it. It does not remove saved looks, artwork, backgrounds, the demo or finished videos.
+- Cache is only cleared when you tap that button. It does not run when you open the app or when an export finishes.
 
 **Good to know**
-- A later export of the same AI-sharpened video background will sharpen the frames again, instead of leaving a large leftover cache on the phone.
-- The song you currently have open is kept, so you don't have to import it again. After you leave the app and come back, that temporary audio is cleared too (the demo loads as usual).
+- A later export of the same AI-sharpened video background can reuse the frame cache until you tap Clear cache. That cache can use a few hundred megabytes until then.
+- The song you currently have open is kept, so you don't have to import it again.
 - **Clear cache** is turned off while an export is running.
+- Finished videos in Movies, your gallery, or the file you picked stay put, including after you clear cache and reopen the app.
 
 
 ## 1.16.0 — Android device compatibility

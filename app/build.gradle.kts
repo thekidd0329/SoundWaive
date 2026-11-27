@@ -39,7 +39,7 @@ android {
         minSdk = minimumAndroidApi
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 22
+        versionCode = 23
         versionName = "1.17.5"
         ndk { abiFilters += androidTargets.keys }
     }
