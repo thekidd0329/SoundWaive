@@ -49,9 +49,9 @@ GitHub Actions history for a given commit is at the [Android workflow runs](http
 
 ## 1.16.0 compatibility checks
 
-The local build passed 24 Rust tests, 53 JVM tests and Android lint with zero errors. The debug APK, release APK and release AAB contain the Rust analysis engine and the appropriate offline sharpening libraries for all four ABIs. An API 26 x86 emulator imported the demo, exported an H.264/AAC MP4 after leaving the activity and checked the AAC timing against a reference pulse.
+Before the Release Pack integration, the compatibility branch's local build passed 24 Rust tests, 53 JVM tests and Android lint with zero errors. The debug APK, release APK and release AAB contain the Rust analysis engine and the appropriate offline sharpening libraries for all four ABIs. An API 26 x86 emulator imported the demo, exported an H.264/AAC MP4 after leaving the activity and checked the AAC timing against a reference pulse.
 
-The Android workflow runs the background export, AAC priming and photo sharpening tests on AOSP images for APIs 26, 34 and 35. Each device job publishes its instrumentation results.
+The Android workflow runs the background export, AAC priming and photo sharpening tests on AOSP images for APIs 26, 34 and 35. Each device job publishes its instrumentation results. The rebased build also checks saving a completed MP4 through the Release Pack storage path and rendering a silent loop through the adaptive AVC encoder. These new combined checks, the AVC/AAC fallback changes and the rebased build are awaiting CI; earlier results are historical.
 
 ## Original 1.0 emulator checks
 

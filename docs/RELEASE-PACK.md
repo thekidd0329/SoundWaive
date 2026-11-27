@@ -14,11 +14,11 @@ Export › **Render Release Pack** turns one imported song into seven videos wit
 | 6 | `<song>_Canvas_8s.mp4` | 1080 × 1920 | whole bars, 3–8 s | none | ≤ 30 |
 | 7 | `<song>_YouTube_16x9.mp4` | 3840 × 2160 or 1920 × 1080 | full song | AAC 320k, the look's own fades | look |
 
-They render in that order: short clips first so they are ready soonest, and the long YouTube render last. All are H.264 (High profile when the encoder lists it) in MP4, saved to `Movies/SoundWaive/<song>/`. `<song>` is the imported file name without its extension, with characters that file systems reject replaced by `_`. Rendering a pack again replaces the files from the last run (same names).
+They render in that order: short clips first so they are ready soonest, and the long YouTube render last. All are H.264 (High profile when the encoder lists it) in MP4, saved to `Movies/SoundWaive/<song>/`. `<song>` is the imported file name without its extension, with characters that file systems reject replaced by `_`. Rendering a pack again replaces the files from the last run (same names). Android 10+ saves through scoped MediaStore; Android 8/9 asks for storage permission only when exporting a Release Pack and indexes the completed MP4 in public Movies. Single-video exports continue using the document picker without that permission.
 
-Bitrates are the look's video quality setting for the clips. The YouTube video uses 45 Mbps at 4K and 24/30 fps, or 68 Mbps at 4K and 60 fps (YouTube's recommended SDR upload rates). 4K is used only when `MediaCodecList.findEncoderForFormat` accepts 3840 × 2160 at that frame rate and bitrate, in either orientation. Otherwise the video falls back to 1080p, and the results say so.
+Bitrates are the look's video quality setting for the clips. The YouTube video uses 45 Mbps at 4K and 24/30 fps, or 68 Mbps at 4K and 60 fps (YouTube's recommended SDR upload rates). 4K is used only when `MediaCodecList.findEncoderForFormat` accepts 3840 × 2160 at that frame rate and bitrate, in either orientation. Otherwise the video falls back to 1080p, and the results say so. The compatibility encoder can also retry lower frame rates, 720p or 360p and reports the actual settings if a device cannot start the requested encoder.
 
-Spotify Canvas spec: 9:16, 3–8 s, at least 720 px tall, MP4, no audio. The Canvas file meets all four.
+Spotify Canvas spec: 9:16, 3–8 s, at least 720 px tall, MP4, no audio. The Canvas targets all of these requirements. If the device can only encode a lower resolution, the result reports that fallback; verify the reported dimensions before uploading.
 
 ## How windows are chosen
 
