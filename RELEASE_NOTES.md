@@ -1,5 +1,9 @@
 # SoundWaive release notes
 
+## 1.17.1 — Lyrics dictionary fix
+
+- Align lyrics failed right away with a missing-file message for the pronunciation dictionary. Android was dropping the `.gz` ending from that bundled file when it packaged the app. This release ships the dictionary under a name that stays intact, then copies it to the name the aligner already expects. Update and tap Align lyrics again; no Wi-Fi is needed.
+
 ## 1.17.0 — Word-timed lyrics
 
 **What's new**
