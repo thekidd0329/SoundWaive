@@ -49,3 +49,7 @@ Keep the app open during analysis. Exports keep running in the background, with 
 ![Original visual styles](docs/images/looks.png)
 
 The screenshots show the original CrownPulse build; SoundWaive retains its visual design. The Android application ID remains `com.parker.crownpulse` for compatibility with that installation. The included demo is generated from oscillators and noise, with no unreleased recordings. The crown artwork belongs to the owner; see [media and code rights](LICENSE.md).
+
+## Acknowledgments
+
+Some implementations were designed with the help of GrokBot.
