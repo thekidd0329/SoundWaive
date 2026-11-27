@@ -31,7 +31,7 @@ CI results are recorded separately. They are not a substitute for a device test.
 
 Everything else Christian tested on 1.0 through 1.11 worked smoothly.
 
-## 1.12.x through 1.15.0
+## 1.12.x through 1.16.0
 
 These builds are awaiting Christian's device test.
 
@@ -43,11 +43,11 @@ These builds are awaiting Christian's device test.
 | 1.13.1 | 2026-11-21 | Awaiting Christian's device test | Adds `-Xskip-metadata-version-check` so that LiteRT compile can proceed, and includes 1.12.1. Not yet compiled, because of a CI download flake. |
 | 1.14.0 | 2026-11-21 | Awaiting Christian's device test | Background export: a `mediaProcessing` foreground service so a render keeps going when the app leaves the screen. |
 | 1.15.0 | 2026-11-26 | Awaiting Christian's device test | Release Pack: one tap renders YouTube 16:9 (4K or 1080p), three distinct 15 s verticals, a 30 s reel, a square promo and a silent 8 s looping Spotify Canvas to Movies/SoundWaive/<song>/. Not built or run locally; awaiting CI and Christian's on-device test. |
-| 1.15.0 | 2026-11-22 | Awaiting Christian's device test | Android 8+ support across four ARM and Intel ABIs. |
+| 1.16.0 | 2026-11-22 | Awaiting Christian's device test | Android 8+ support across four ARM and Intel ABIs. |
 
 GitHub Actions history for a given commit is at the [Android workflow runs](https://github.com/thekidd0329/SoundWaive/actions/workflows/android.yml).
 
-## 1.15.0 compatibility checks
+## 1.16.0 compatibility checks
 
 The local build passed 24 Rust tests, 53 JVM tests and Android lint with zero errors. The debug APK, release APK and release AAB contain the Rust analysis engine and the appropriate offline sharpening libraries for all four ABIs. An API 26 x86 emulator imported the demo, exported an H.264/AAC MP4 after leaving the activity and checked the AAC timing against a reference pulse.
 
