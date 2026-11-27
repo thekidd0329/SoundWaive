@@ -85,6 +85,10 @@ class MainActivity : Activity() {
     private var lastUri: Uri? = null
     private var pendingExport: Uri? = null
     private var pendingExportPicker = false
+    private var pendingPack = false
+    /** The last Release Pack's saved videos, kept across restarts for the results list. */
+    private var lastPack: List<PackResult> = emptyList()
+    private var lastPackFolder = ""
     private var closing = false
     private var savedPlayback = false
     private val prefs by lazy { getSharedPreferences("crownpulse", MODE_PRIVATE) }
@@ -102,6 +106,7 @@ class MainActivity : Activity() {
                 Settings()
             }
         renderer = VisualRenderer(this)
+        restorePack()
         restoreImages()
         val exportJob = ExportSession.job
         if (exportJob == null) {
@@ -1134,6 +1139,18 @@ class MainActivity : Activity() {
                 button("Play last export") { openExport() },
                 button("Share video") { shareExport() },
             )
+        section(
+            "Release Pack",
+            "One tap makes 7 videos from this song with this look: the full song for YouTube (16:9), three different 15 s vertical promos, a 30 s reel (9:16), a square promo and a silent 8 s looping Spotify Canvas (9:16). Clips start on a bar line at the song's strongest parts, with short fades. Saved to Movies/SoundWaive/<song>. The start and end times above don't apply. You can leave the app while it renders.",
+        )
+        select("YouTube resolution", "packYouTube", Settings.PACK_YOUTUBE)
+        select("Square promo length", "packSquare", Settings.PACK_SQUARE)
+        addButtonRow(button("Render Release Pack", true) { requestExport(pack = true) })
+        if (lastPack.isNotEmpty()) {
+            section("Last Release Pack", "Movies/SoundWaive/$lastPackFolder")
+            for (result in lastPack) packRow(result)
+            addButtonRow(button("Share all ${lastPack.size}") { shareVideos(lastPack.map { it.uri }) })
+        }
         section("Your setup")
         addButtonRow(
             button("Save look") { saveLook() },
@@ -1159,7 +1176,8 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun requestExport() {
+    /** A single export ([pack] false, asks where to save) or a Release Pack (saves to Movies). */
+    private fun requestExport(pack: Boolean = false) {
         currentFocus?.clearFocus()
         if (busy || track == null) return
         if (ExportSession.isRunning()) {
@@ -1167,24 +1185,27 @@ class MainActivity : Activity() {
             return
         }
         val t = track!!
-        if (settings.f("trimStart") < 0 || settings.f("trimStart") >= t.analysis.duration) {
-            toast("Start time must be inside the song.")
-            return
-        }
-        if (settings.f("trimEnd") > 0 && settings.f("trimEnd") <= settings.f("trimStart")) {
-            toast("End time must be after the start time.")
-            return
+        if (!pack) {
+            if (settings.f("trimStart") < 0 || settings.f("trimStart") >= t.analysis.duration) {
+                toast("Start time must be inside the song.")
+                return
+            }
+            if (settings.f("trimEnd") > 0 && settings.f("trimEnd") <= settings.f("trimStart")) {
+                toast("End time must be after the start time.")
+                return
+            }
         }
         if (
             Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
                     android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            pendingExportPicker = true
+            pendingExportPicker = !pack
+            pendingPack = pack
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 109)
             return
         }
-        openExportPicker()
+        if (pack) startJob(null, pack = true) else openExportPicker()
     }
 
     private fun openExportPicker() {
@@ -1199,14 +1220,19 @@ class MainActivity : Activity() {
     }
 
     private fun renderExport(uri: Uri) {
-        val original = track ?: return
-        if (ExportSession.isRunning()) return
+        if (track == null || ExportSession.isRunning()) return
         try {
             contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         } catch (_: Exception) {}
+        startJob(uri, pack = false)
+    }
+
+    private fun startJob(uri: Uri?, pack: Boolean) {
+        val original = track ?: return
+        if (ExportSession.isRunning()) return
         val snapshot = settings.copy()
         pause()
         val job =
@@ -1219,6 +1245,7 @@ class MainActivity : Activity() {
                 photo = backgroundPhoto(snapshot),
                 aiPhoto = aiPhoto,
                 aiPhotoChip = aiPhotoChip,
+                pack = pack,
             )
         if (!ExportSession.begin(job)) {
             toast("An export is already running.")
@@ -1253,6 +1280,7 @@ class MainActivity : Activity() {
                 progressBar.progress = (state.progress * 1000).toInt()
             }
             is ExportStatus.Finished,
+            is ExportStatus.PackFinished,
             is ExportStatus.Failed,
             is ExportStatus.Canceled -> {
                 val result = ExportSession.consume() ?: return
@@ -1280,6 +1308,10 @@ class MainActivity : Activity() {
                             .setMessage(result.message)
                             .setPositiveButton("OK", null)
                             .show()
+                    }
+                    is ExportStatus.PackFinished -> {
+                        endBusy()
+                        showPackResult(result)
                     }
                     is ExportStatus.Canceled -> endBusy()
                     else -> {}
@@ -1326,30 +1358,152 @@ class MainActivity : Activity() {
     }
 
     private fun openExport() {
-        lastUri?.let {
-            try {
-                startActivity(
-                    Intent(Intent.ACTION_VIEW)
-                        .setDataAndType(it, "video/mp4")
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                )
-            } catch (_: Exception) {
-                toast("Use your Files app to open the saved MP4.")
-            }
-        }
+        lastUri?.let { openVideo(it) }
     }
 
     private fun shareExport() {
-        lastUri?.let {
+        lastUri?.let { shareVideos(listOf(it)) }
+    }
+
+    private fun openVideo(uri: Uri) {
+        try {
             startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_SEND)
-                        .setType("video/mp4")
-                        .putExtra(Intent.EXTRA_STREAM, it)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                    "Share your video",
-                )
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "video/mp4")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             )
+        } catch (_: Exception) {
+            toast("Use your Files app to open the saved MP4.")
+        }
+    }
+
+    /** Share sheet for one video or several (Release Pack "Share all"). */
+    private fun shareVideos(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val send =
+            if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+            else
+                Intent(Intent.ACTION_SEND_MULTIPLE)
+                    .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        send.type = "video/mp4"
+        send.clipData =
+            android.content.ClipData.newRawUri("", uris[0]).apply {
+                for (uri in uris.drop(1)) addItem(android.content.ClipData.Item(uri))
+            }
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(
+                Intent.createChooser(send, if (uris.size == 1) "Share your video" else "Share your videos")
+            )
+        } catch (_: Exception) {
+            toast("No app on this phone can share videos.")
+        }
+    }
+
+    /** One line in the Release Pack results: what it is, then Play and Share. */
+    private fun packRow(result: PackResult) {
+        val line = row()
+        val details =
+            "${result.width} × ${result.height} · ${"%.1f".format(java.util.Locale.US, result.duration)} s" +
+                (if (result.silent) " · loop, no audio" else "") +
+                (if (result.label.startsWith("YouTube")) "" else " · from ${formatTime(result.start)}")
+        val label =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(result.label, 14f, Color.WHITE, true))
+                addView(
+                    text(details, 12f, muted),
+                    LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(3) },
+                )
+            }
+        line.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
+        line.addView(
+            button("Play") { openVideo(result.uri) },
+            LinearLayout.LayoutParams(-2, dp(44)).apply { leftMargin = dp(8) },
+        )
+        line.addView(
+            button("Share") { shareVideos(listOf(result.uri)) },
+            LinearLayout.LayoutParams(-2, dp(44)).apply { leftMargin = dp(8) },
+        )
+    }
+
+    private fun showPackResult(result: ExportStatus.PackFinished) {
+        if (result.results.isNotEmpty()) {
+            lastPack = result.results
+            lastPackFolder = result.folder
+            savePack()
+        }
+        showPage("Export")
+        if (result.canceled && result.results.isEmpty() && result.problems.isEmpty()) return
+        val lines = StringBuilder()
+        lines.append(
+            "${result.results.size} of 7 videos saved to Movies/SoundWaive/${result.folder}."
+        )
+        for (r in result.results) lines.append("\n• ${r.label} · ${r.width} × ${r.height}")
+        if (result.problems.isNotEmpty()) {
+            lines.append("\n\nNot finished:")
+            for (p in result.problems) lines.append("\n• $p")
+        }
+        for (n in result.notes) lines.append("\n\n$n")
+        val dialog =
+            AlertDialog.Builder(this)
+                .setTitle(
+                    when {
+                        result.canceled -> "Release Pack stopped"
+                        result.problems.isEmpty() -> "Your Release Pack is ready"
+                        else -> "Release Pack finished with problems"
+                    }
+                )
+                .setMessage(lines.toString())
+                .setNegativeButton("Done", null)
+        if (result.results.isNotEmpty())
+            dialog.setPositiveButton("Share all") { _, _ ->
+                shareVideos(result.results.map { it.uri })
+            }
+        dialog.show()
+    }
+
+    private fun savePack() {
+        val list = org.json.JSONArray()
+        for (r in lastPack)
+            list.put(
+                JSONObject()
+                    .put("label", r.label)
+                    .put("fileName", r.fileName)
+                    .put("uri", r.uri.toString())
+                    .put("width", r.width)
+                    .put("height", r.height)
+                    .put("duration", r.duration.toDouble())
+                    .put("start", r.start.toDouble())
+                    .put("silent", r.silent)
+            )
+        prefs
+            .edit()
+            .putString("lastPack", list.toString())
+            .putString("lastPackFolder", lastPackFolder)
+            .apply()
+    }
+
+    private fun restorePack() {
+        try {
+            val list = org.json.JSONArray(prefs.getString("lastPack", null) ?: return)
+            lastPack =
+                (0 until list.length()).map {
+                    val o = list.getJSONObject(it)
+                    PackResult(
+                        label = o.getString("label"),
+                        fileName = o.optString("fileName"),
+                        uri = Uri.parse(o.getString("uri")),
+                        width = o.getInt("width"),
+                        height = o.getInt("height"),
+                        duration = o.getDouble("duration").toFloat(),
+                        start = o.optDouble("start", 0.0).toFloat(),
+                        silent = o.optBoolean("silent"),
+                    )
+                }
+            lastPackFolder = prefs.getString("lastPackFolder", "") ?: ""
+        } catch (_: Exception) {
+            lastPack = emptyList()
         }
     }
 
@@ -1453,10 +1607,12 @@ class MainActivity : Activity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 109 && pendingExportPicker) {
+        if (requestCode == 109 && (pendingExportPicker || pendingPack)) {
+            val pack = pendingPack
             pendingExportPicker = false
+            pendingPack = false
             if (busy || track == null) return
-            openExportPicker()
+            if (pack) startJob(null, pack = true) else openExportPicker()
         }
     }
 
@@ -1579,7 +1735,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Make every track its own world")
             .setMessage(
-                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size."
+                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size."
             )
             .setPositiveButton("Let’s make something", null)
             .show()

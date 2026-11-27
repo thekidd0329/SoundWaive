@@ -271,6 +271,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "backgroundFit" to BackgroundMath.FITS,
                 "backgroundEnd" to BackgroundMath.ENDS,
                 "renderQuality" to BackgroundMath.QUALITIES,
+                "packYouTube" to PACK_YOUTUBE,
+                "packSquare" to PACK_SQUARE,
             )
         for ((k, allowed) in enums) if (json.has(k) && json.optString(k) !in allowed) json.remove(k)
         for (k in
@@ -331,6 +333,8 @@ class Settings(var json: JSONObject = newLook()) {
                 "syncOffset",
                 "tempoOverride",
                 "renderQuality",
+                "packYouTube",
+                "packSquare",
                 // The chosen background media belongs to the user, not to a preset.
                 "backgroundType",
                 "backgroundUri",
@@ -690,7 +694,17 @@ class Settings(var json: JSONObject = newLook()) {
                 "waveLineAmount" to 1.0,
                 "waveRing" to true,
                 "waveRingAmount" to 1.0,
+                // 1.15 Release Pack: export settings, not part of a look's appearance.
+                "packYouTube" to PACK_4K,
+                "packSquare" to "30 s",
+                // Set only on the Release Pack's per-clip copies (see ReleasePack).
+                "fitSymbolToFrame" to false,
             )
+
+        const val PACK_4K = "2160p (4K)"
+        const val PACK_1080 = "1080p"
+        val PACK_YOUTUBE = listOf(PACK_4K, PACK_1080)
+        val PACK_SQUARE = listOf("15 s", "30 s", "60 s")
     }
 }
 

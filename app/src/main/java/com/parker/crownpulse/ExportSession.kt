@@ -5,9 +5,12 @@ import android.net.Uri
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Everything the export service needs so it can keep going if the screen is left. */
+/**
+ * Everything the export service needs so it can keep going if the screen is left. A single
+ * export writes to [output]; a Release Pack ([pack]) has no output and saves to Movies.
+ */
 class ExportJob(
-    val output: Uri,
+    val output: Uri?,
     var track: Track,
     val settings: Settings,
     val artwork: Bitmap?,
@@ -15,6 +18,7 @@ class ExportJob(
     val photo: Bitmap?,
     val aiPhoto: Bitmap?,
     val aiPhotoChip: String?,
+    val pack: Boolean = false,
 )
 
 sealed class ExportStatus {
@@ -32,6 +36,15 @@ sealed class ExportStatus {
     ) : ExportStatus()
 
     data class Failed(val message: String) : ExportStatus()
+
+    /** A Release Pack ended: what was saved, what failed, and whether it was stopped early. */
+    data class PackFinished(
+        val folder: String,
+        val results: List<PackResult>,
+        val problems: List<String>,
+        val notes: List<String>,
+        val canceled: Boolean,
+    ) : ExportStatus()
 
     data object Canceled : ExportStatus()
 }
@@ -92,6 +105,16 @@ object ExportSession {
         publish(ExportStatus.Finished(uri, width, height, duration, notice, aiLine))
     }
 
+    fun finishPack(
+        folder: String,
+        results: List<PackResult>,
+        problems: List<String>,
+        notes: List<String>,
+        canceled: Boolean,
+    ) {
+        publish(ExportStatus.PackFinished(folder, results, problems, notes, canceled))
+    }
+
     fun fail(message: String) {
         publish(ExportStatus.Failed(message))
     }
@@ -109,6 +132,7 @@ object ExportSession {
         val current = status
         if (
             current is ExportStatus.Finished ||
+                current is ExportStatus.PackFinished ||
                 current is ExportStatus.Failed ||
                 current is ExportStatus.Canceled
         ) {

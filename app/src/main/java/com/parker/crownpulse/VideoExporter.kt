@@ -26,6 +26,31 @@ class VideoExporter {
         val notice: String? = null,
     )
 
+    /**
+     * Per-render overrides used by the Release Pack. The defaults keep a normal export exactly
+     * as it was: size, frame rate and bitrate from the look, full audio, no loop.
+     */
+    data class Options(
+        /** Output size; 0 means from the look's frame shape and resolution. */
+        val width: Int = 0,
+        val height: Int = 0,
+        /** Video bitrate in bit/s; 0 means the look's setting. */
+        val bitrate: Int = 0,
+        /** Frames per second; 0 means the look's setting. */
+        val fps: Int = 0,
+        /** False writes a video-only MP4 (Spotify Canvas has no audio). */
+        val audio: Boolean = true,
+        /** Seconds of linear audio fade at the start and end of the range. */
+        val audioFadeIn: Float = 0f,
+        val audioFadeOut: Float = 0f,
+        /**
+         * Seconds of seamless-loop crossfade. When above 0 the last frames are blended into
+         * the frames just before the range starts, so the clip's last frame leads straight
+         * into its first. Uses the CPU drawing path (two scene renders per blended frame).
+         */
+        val loopCrossfade: Float = 0f,
+    )
+
     /** The GPU effects path for one export (see [openEffects]). */
     private class Effects(
         val recorder: SceneRecorder,
@@ -94,6 +119,9 @@ class VideoExporter {
         }
     }
 
+    fun dimensions(s: Settings, o: Options): Pair<Int, Int> =
+        if (o.width > 0 && o.height > 0) o.width to o.height else dimensions(s)
+
     fun dimensions(s: Settings): Pair<Int, Int> {
         val short = if (s.s("resolution") == "720p") 720 else 1080
         return when (s.s("aspect")) {
@@ -110,6 +138,7 @@ class VideoExporter {
         renderer: VisualRenderer,
         dir: File,
         cancel: AtomicBoolean,
+        options: Options = Options(),
         progress: (String, Float) -> Unit,
     ): Result {
         dir.mkdirs()
@@ -124,7 +153,9 @@ class VideoExporter {
             "Audio preparation is incomplete. Import the track again."
         }
         val audio = File(dir, "audio-${System.nanoTime()}.m4a")
-        val output = File(dir, "CrownPulse-${System.currentTimeMillis()}.mp4")
+        val output = File(dir, "CrownPulse-${System.nanoTime()}.mp4")
+        val withAudio = options.audio
+        val loop = options.loopCrossfade > 0f
         var codec: MediaCodec? = null
         var egl: EncoderSurface? = null
         var mux: MediaMuxer? = null
@@ -135,17 +166,32 @@ class VideoExporter {
         var success = false
         var effects: Effects? = null
         var notice: String? = null
+        val preroll = ArrayList<Bitmap>()
         try {
-            val encoderDelay =
-                encodeAudio(track, start, end, audio, cancel) {
-                    progress("Preparing full-quality audio", it * .1f)
-                }
-            ae.setDataSource(audio.absolutePath)
-            ae.selectTrack(0)
-            val af = ae.getTrackFormat(0)
-            val (w, h) = dimensions(s)
-            val fps = s.s("fps").toIntOrNull() ?: 30
-            val bitrate = (s.s("bitrate").substringBefore(' ').toIntOrNull() ?: 12) * 1_000_000
+            var encoderDelay = 0
+            var af: MediaFormat? = null
+            if (withAudio) {
+                encoderDelay =
+                    encodeAudio(
+                        track,
+                        start,
+                        end,
+                        audio,
+                        cancel,
+                        options.audioFadeIn,
+                        options.audioFadeOut,
+                    ) {
+                        progress("Preparing full-quality audio", it * .1f)
+                    }
+                ae.setDataSource(audio.absolutePath)
+                ae.selectTrack(0)
+                af = ae.getTrackFormat(0)
+            }
+            val (w, h) = dimensions(s, options)
+            val fps = if (options.fps > 0) options.fps else s.s("fps").toIntOrNull() ?: 30
+            val bitrate =
+                if (options.bitrate > 0) options.bitrate
+                else (s.s("bitrate").substringBefore(' ').toIntOrNull() ?: 12) * 1_000_000
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h)
             format.setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
@@ -172,14 +218,21 @@ class VideoExporter {
                 throw IllegalStateException(
                     "This phone cannot export this size and frame rate. Try 720p at 30 fps."
                 )
-            codec = MediaCodec.createByCodecName(name)
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            // H.264 High profile when the encoder lists it (better quality per bit than the
+            // Baseline/Main default); the level is the encoder's highest for High, an upper
+            // bound it picks below. If the encoder still refuses, configure without it.
+            val high = highProfileLevel(codecs, name)
+            if (high != null) {
+                format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+                format.setInteger(MediaFormat.KEY_LEVEL, high)
+            }
+            codec = openEncoder(name, format, high != null)
             surface = codec.createInputSurface()
             egl = EncoderSurface(surface, if (rotated) h else w, if (rotated) w else h, rotated)
             codec.start()
             mux = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             if (rotated) mux.setOrientationHint(90)
-            val audioIndex = mux.addTrack(af)
+            val audioIndex = if (af != null) mux.addTrack(af) else -1
             var videoIndex = -1
             val info = MediaCodec.BufferInfo()
             fun drain(endOfStream: Boolean) {
@@ -224,14 +277,34 @@ class VideoExporter {
             // so the existing EGL pass still presents each frame at its exact music time.
             // If the GPU path is unavailable or fails, the CPU bitmap path takes over.
             val work = BackgroundMath.renderSize(w, h, s.s("renderQuality"))
-            var gpu: Surface? = egl.openCanvas(work.width, work.height)
+            // A seamless loop blends two scene renders per frame on the CPU path.
+            var gpu: Surface? = if (loop) null else egl.openCanvas(work.width, work.height)
             // Fastest path: the scene on the GPU with a transparent background, then one
             // shader pass for the background, video and full-frame effects (see GpuPost).
             effects = gpu?.let { openEffects(egl, it, work, w, s, renderer) }
-            if (effects == null) notice = SLOWER_PATH
+            if (effects == null && !loop) notice = SLOWER_PATH
             var canvas: Canvas? = null
-            val total = ceil((end - start) * fps).toInt()
+            // A loop must last exactly a whole number of frames so the crossfade partners
+            // line up: frame f blends with the frame one loop length earlier.
+            val total =
+                if (loop) max(1, ((end - start) * fps).roundToInt())
+                else ceil((end - start) * fps).toInt()
+            val loopFrames =
+                if (loop) min((options.loopCrossfade * fps).roundToInt(), (start * fps).toInt())
+                    .coerceIn(0, total - 1)
+                else 0
+            preroll.ensureCapacity(loopFrames)
+            val blend = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
             var lastUpdate = 0L
+            // Render the frames just before the loop first (time only moves forward, so video
+            // backgrounds keep decoding in order) and hold them for the crossfade at the end.
+            for (k in 0 until loopFrames) {
+                if (cancel.get()) throw InterruptedException("Export canceled")
+                val time = start + (k - loopFrames) / fps.toFloat()
+                val frame = Bitmap.createBitmap(work.width, work.height, Bitmap.Config.ARGB_8888)
+                preroll.add(frame)
+                renderer.draw(Canvas(frame), work.width, work.height, time, track.analysis, s, true)
+            }
             for (f in 0 until total) {
                 if (cancel.get()) throw InterruptedException("Export canceled")
                 val time = start + f / fps.toFloat()
@@ -299,6 +372,14 @@ class VideoExporter {
                                     canvas = Canvas(it)
                                 }
                     renderer.draw(canvas!!, work.width, work.height, time, track.analysis, s, true)
+                    val k = f - (total - loopFrames)
+                    if (k >= 0) {
+                        // Fade toward the frame one loop earlier; at the wrap the next frame
+                        // shown is frame 0, which follows that one in time.
+                        blend.alpha = (255f * (k + 1) / (loopFrames + 1)).roundToInt()
+                        canvas!!.drawBitmap(preroll[k], 0f, 0f, blend)
+                        preroll[k].recycle()
+                    }
                     egl.draw(image, nanos)
                 }
                 drain(false)
@@ -309,9 +390,9 @@ class VideoExporter {
             }
             codec.signalEndOfInputStream()
             drain(true)
-            progress("Finishing video and audio", .96f)
-            val audioBuffer = ByteBuffer.allocate(1024 * 1024)
-            while (true) {
+            progress(if (withAudio) "Finishing video and audio" else "Finishing video", .96f)
+            val audioBuffer = ByteBuffer.allocate(if (withAudio) 1024 * 1024 else 0)
+            while (withAudio) {
                 if (cancel.get()) throw InterruptedException("Export canceled")
                 audioBuffer.clear()
                 val n = ae.readSampleData(audioBuffer, 0)
@@ -336,15 +417,17 @@ class VideoExporter {
             muxStarted = false
             mux.release()
             mux = null
-            Mp4AudioTiming.apply(
-                output,
-                encoderDelay,
-                ((end - start) * track.rate).toLong(),
-                track.rate,
-            )
+            if (withAudio)
+                Mp4AudioTiming.apply(
+                    output,
+                    encoderDelay,
+                    ((end - start) * track.rate).toLong(),
+                    track.rate,
+                )
             success = true
             progress("Video ready", 1f)
-            return Result(output, w, h, total, end - start, notice)
+            val seconds = if (loop) total / fps.toFloat() else end - start
+            return Result(output, w, h, total, seconds, notice)
         } finally {
             // GL objects first, while the encoder's context is still current.
             try {
@@ -359,6 +442,7 @@ class VideoExporter {
             egl?.release()
             surface?.release()
             bitmap?.recycle()
+            for (frame in preroll) if (!frame.isRecycled) frame.recycle()
             ae.release()
             if (muxStarted)
                 try {
@@ -378,6 +462,8 @@ class VideoExporter {
         end: Float,
         out: File,
         cancel: AtomicBoolean,
+        fadeIn: Float = 0f,
+        fadeOut: Float = 0f,
         progress: (Float) -> Unit,
     ): Int {
         // The standard Android AAC-LC encoders use 2048 priming samples.
@@ -417,6 +503,8 @@ class VideoExporter {
             var outputDone = false
             val info = MediaCodec.BufferInfo()
             val temp = ByteArray(16384)
+            val fadeInFrames = (fadeIn * track.rate).toLong().coerceAtLeast(0)
+            val fadeOutFrames = (fadeOut * track.rate).toLong().coerceAtLeast(0)
             RandomAccessFile(track.pcm!!, "r").use { file ->
                 file.seek((start * track.rate).toLong() * bytesPerFrame)
                 while (!outputDone) {
@@ -436,6 +524,16 @@ class VideoExporter {
                                         min(amount.toLong(), (sourceBytes - read).coerceAtLeast(0))
                                             .toInt()
                                     if (fromSource > 0) file.readFully(temp, 0, fromSource)
+                                    if (fromSource > 0 && (fadeInFrames > 0 || fadeOutFrames > 0))
+                                        applyFades(
+                                            temp,
+                                            fromSource,
+                                            track.channels,
+                                            read / bytesPerFrame,
+                                            frames,
+                                            fadeInFrames,
+                                            fadeOutFrames,
+                                        )
                                     amount
                                 } else -1
                             val pts = (read / bytesPerFrame) * 1_000_000L / track.rate
@@ -495,6 +593,64 @@ class VideoExporter {
             mux?.release()
         }
     }
+
+    /** Can this phone's H.264 encoder take [w]x[h] at [fps] and [bitrate] (either orientation)? */
+    fun canEncode(w: Int, h: Int, fps: Int, bitrate: Int): Boolean {
+        val codecs = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+        fun format(width: Int, height: Int) =
+            MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+                setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
+                )
+                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            }
+        return try {
+            codecs.findEncoderForFormat(format(w, h)) != null ||
+                (w != h && codecs.findEncoderForFormat(format(h, w)) != null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Encoder capability check failed", e)
+            false
+        }
+    }
+
+    /** A configured encoder; retries once without the profile if it refuses High. */
+    private fun openEncoder(name: String, format: MediaFormat, withProfile: Boolean): MediaCodec {
+        val first = MediaCodec.createByCodecName(name)
+        try {
+            first.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            return first
+        } catch (e: Exception) {
+            first.release()
+            if (!withProfile) throw e
+            Log.w(TAG, "Encoder refused H.264 High; using its default profile", e)
+        }
+        format.removeKey(MediaFormat.KEY_PROFILE)
+        format.removeKey(MediaFormat.KEY_LEVEL)
+        val second = MediaCodec.createByCodecName(name)
+        try {
+            second.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            return second
+        } catch (e: Exception) {
+            second.release()
+            throw e
+        }
+    }
+
+    /** Highest H.264 High level the encoder [name] lists, or null if it has no High profile. */
+    private fun highProfileLevel(codecs: MediaCodecList, name: String): Int? =
+        try {
+            codecs.codecInfos
+                .firstOrNull { it.name == name }
+                ?.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                ?.profileLevels
+                ?.filter { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
+                ?.maxOfOrNull { it.level }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read the encoder's H.264 profiles", e)
+            null
+        }
 
     private class EncoderSurface(
         val surface: Surface,
@@ -835,8 +991,43 @@ class VideoExporter {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "SoundWaive"
+
+        /**
+         * Linear fade on interleaved 16-bit little-endian PCM in [buf] (the first [bytes]
+         * bytes), whose first frame is frame [first] of a range of [frames] frames. Frames in
+         * the first [fadeIn] and last [fadeOut] frames of the range are scaled toward silence.
+         */
+        fun applyFades(
+            buf: ByteArray,
+            bytes: Int,
+            channels: Int,
+            first: Long,
+            frames: Long,
+            fadeIn: Long,
+            fadeOut: Long,
+        ) {
+            val stride = channels * 2
+            val count = bytes / stride
+            for (j in 0 until count) {
+                val at = first + j
+                var gain = 1f
+                if (fadeIn > 0 && at < fadeIn) gain = at.toFloat() / fadeIn
+                val left = frames - 1 - at
+                if (fadeOut > 0 && left < fadeOut)
+                    gain = min(gain, (left.coerceAtLeast(0)).toFloat() / fadeOut)
+                if (gain >= 1f) continue
+                for (ch in 0 until channels) {
+                    val i = j * stride + ch * 2
+                    val v = ((buf[i].toInt() and 0xff) or (buf[i + 1].toInt() shl 8)).toShort()
+                    val scaled = (v * gain).roundToInt().coerceIn(-32768, 32767)
+                    buf[i] = scaled.toByte()
+                    buf[i + 1] = (scaled shr 8).toByte()
+                }
+            }
+        }
+
         const val SLOWER_PATH =
             "This phone couldn't use the fast GPU effects, so this video used the standard path."
         const val STOPPED_PATH =
