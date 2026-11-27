@@ -104,6 +104,26 @@ class AndroidCompatibilityTest {
             } finally {
                 context.contentResolver.delete(saved, null, null)
             }
+            // The Release Pack Canvas uses the same adaptive AVC path without an AAC track.
+            val canvasSettings = settings.copy().apply {
+                set("trimStart", .25f)
+                set("trimEnd", .75f)
+            }
+            val canvas = VideoExporter(context).export(
+                imported, canvasSettings, VisualRenderer(context),
+                File(context.cacheDir, "compat-canvas"), AtomicBoolean(false),
+                VideoExporter.Options(width = 360, height = 640, fps = 24, audio = false, loopCrossfade = .15f),
+            ) { _, _ -> }
+            val canvasExtractor = MediaExtractor()
+            try {
+                canvasExtractor.setDataSource(canvas.file.absolutePath)
+                assertEquals(1, canvasExtractor.trackCount)
+                assertEquals("video/avc", canvasExtractor.getTrackFormat(0).getString(MediaFormat.KEY_MIME))
+                assertTrue(canvas.frames > 0)
+            } finally {
+                canvasExtractor.release()
+                canvas.file.delete()
+            }
         } finally {
             ExportSession.stopListening(listener)
             if (ExportSession.isRunning()) ExportSession.cancel.set(true)
