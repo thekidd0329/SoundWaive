@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -29,11 +30,14 @@ class ExportService : Service() {
             return START_NOT_STICKY
         }
         ensureChannel()
-        startForeground(
-            PROGRESS_ID,
-            progressNotification(ExportSession.status),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING,
-        )
+        val notification = progressNotification(ExportSession.status)
+        when {
+            Build.VERSION.SDK_INT >= 35 ->
+                startForeground(PROGRESS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)
+            Build.VERSION.SDK_INT >= 29 ->
+                startForeground(PROGRESS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else -> startForeground(PROGRESS_ID, notification)
+        }
         if (wakeLock?.isHeld != true) {
             wakeLock =
                 (getSystemService(POWER_SERVICE) as PowerManager)

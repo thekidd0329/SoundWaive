@@ -3,15 +3,19 @@ package com.parker.crownpulse
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
+import android.os.Process
 import android.util.Log
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.BuiltinNpuAcceleratorProvider
 import com.google.ai.edge.litert.CompiledModel
 import com.google.ai.edge.litert.Environment
-import com.google.ai.edge.litert.TensorBuffer
+import com.google.ai.edge.litert.NpuCompatibilityChecker
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import kotlin.math.min
 
 /**
@@ -23,40 +27,19 @@ import kotlin.math.min
  *
  * The model takes 128 x 128 RGB tiles in 0..1 and returns 512 x 512 ones. Pictures are cut
  * into overlapping tiles (edge pixels repeated at the borders) and only each tile's middle
- * is kept, so no seams show. Everything happens on the caller's thread; [enhance] is
- * synchronized because the model has one set of buffers.
+ * is kept, so no seams show. The photo worker and the exporter share a single inference
+ * thread. The GPU delegate keeps its thread and EGL context when the caller changes.
  *
  * Anything that goes wrong is logged and the caller keeps the original picture: the effect
  * never stops an export.
  */
 class AiUpscaler
 private constructor(
-    private val environment: Environment,
-    private val model: CompiledModel,
     /** "TPU", "GPU" or "CPU". */
     val chip: String,
+    private val runTile: (FloatArray) -> FloatArray,
 ) {
-    private val inputs: List<TensorBuffer> = model.createInputBuffers()
-    private val outputs: List<TensorBuffer> = model.createOutputBuffers()
     private val tile = FloatArray(TILE * TILE * 3)
-
-    /** Milliseconds for one tile after a first warm-up run (gray input). */
-    private fun timeOneTile(): Long {
-        tile.fill(.5f)
-        inputs[0].writeFloat(tile)
-        model.run(inputs, outputs)
-        val start = System.nanoTime()
-        model.run(inputs, outputs)
-        outputs[0].readFloat()
-        return (System.nanoTime() - start) / 1_000_000
-    }
-
-    private fun closeAll() {
-        inputs.forEach { runCatching { it.close() } }
-        outputs.forEach { runCatching { it.close() } }
-        runCatching { model.close() }
-        runCatching { environment.close() }
-    }
 
     /**
      * Upscales and cleans [source] for display with a short side of [targetShort] pixels.
@@ -64,8 +47,10 @@ private constructor(
      * sharp, or it has transparency the model can't keep). Pass [opaque] = true for
      * pictures known to be opaque whose bitmap still reports an alpha channel (video frames).
      */
-    @Synchronized
-    fun enhance(source: Bitmap, targetShort: Int, opaque: Boolean = !source.hasAlpha()): Bitmap? {
+    fun enhance(source: Bitmap, targetShort: Int, opaque: Boolean = !source.hasAlpha()): Bitmap? =
+        onModelThread { enhanceOnModelThread(source, targetShort, opaque) }
+
+    private fun enhanceOnModelThread(source: Bitmap, targetShort: Int, opaque: Boolean): Bitmap? {
         val sourceShort = min(source.width, source.height)
         if (sourceShort <= 0 || sourceShort >= targetShort || !opaque) return null
         // Feed at most half the target size: 4x then lands at 2x the target or more, and is
@@ -105,9 +90,7 @@ private constructor(
                         k += 3
                     }
                 }
-                inputs[0].writeFloat(tile)
-                model.run(inputs, outputs)
-                val result = outputs[0].readFloat()
+                val result = runTile(tile)
                 check(result.size >= OUT * OUT * 3) { "Unexpected model output size ${result.size}" }
                 // Keep only this tile's middle (its CORE x CORE input pixels, times 4).
                 val x0 = cx * SCALE
@@ -162,17 +145,19 @@ private constructor(
         /** Slower than this per tile on the "TPU" means it silently ran on the CPU. */
         private const val NPU_MAX_TILE_MS = 150L
 
+        private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "soundwaive-sharpen") }
         private var shared: AiUpscaler? = null
         private var tried = false
 
+        private fun <T> onModelThread(block: () -> T): T = worker.submit(Callable(block)).get()
+
         /** The loaded upscaler, loading it on first use; null if no chip could run it. */
-        @Synchronized
-        fun get(context: Context): AiUpscaler? {
+        fun get(context: Context): AiUpscaler? = onModelThread {
             if (!tried) {
-                tried = true
                 shared = load(context.applicationContext)
+                tried = true
             }
-            return shared
+            shared
         }
 
         private fun channel(v: Float): Int = (v * 255f + .5f).toInt().coerceIn(0, 255)
@@ -192,49 +177,84 @@ private constructor(
             chip: String,
             npu: Boolean,
         ): AiUpscaler? {
-            var env: Environment? = null
-            var model: CompiledModel? = null
-            return try {
-                env =
-                    if (npu) Environment.create(context, BuiltinNpuAcceleratorProvider(context))
-                    else Environment.create(context)
-                if (accelerator !in env.getAvailableAccelerators()) {
-                    Log.i(TAG, "AI upscale: $chip not available")
-                    env.close()
-                    return null
+            val handles = mutableListOf<AutoCloseable>()
+            var ready = false
+            try {
+                val env = if (npu) {
+                    val provider = BuiltinNpuAcceleratorProvider(context, NpuCompatibilityChecker.GoogleTensor)
+                    if (!provider.isDeviceSupported()) return null
+                    Environment.create(context, provider)
+                } else Environment.create(context)
+                handles.add(env)
+                if (accelerator !in env.getAvailableAccelerators()) return null
+                val compiled = CompiledModel.create(context.assets, asset, CompiledModel.Options(accelerator), env)
+                handles.add(compiled)
+                val inputs = compiled.createInputBuffers().also(handles::addAll)
+                val outputs = compiled.createOutputBuffers().also(handles::addAll)
+                val ai = AiUpscaler(chip) { input ->
+                    inputs[0].writeFloat(input)
+                    compiled.run(inputs, outputs)
+                    outputs[0].readFloat()
                 }
-                model = CompiledModel.create(context.assets, asset, CompiledModel.Options(accelerator), env)
-                val upscaler = AiUpscaler(env, model, chip)
-                val ms = upscaler.timeOneTile()
+                ai.tile.fill(.5f)
+                ai.runTile(ai.tile)
+                val start = System.nanoTime()
+                ai.runTile(ai.tile)
+                val ms = (System.nanoTime() - start) / 1_000_000
                 if (npu && ms > NPU_MAX_TILE_MS) {
-                    // A runtime/dispatch version mismatch can "load" on the NPU but run on
-                    // the CPU (hundreds of ms); then the GPU is the faster choice.
-                    Log.w(TAG, "AI upscale: TPU tile took $ms ms, looks like CPU fallback; trying the GPU")
-                    upscaler.closeAll()
+                    Log.w(TAG, "AI upscale: TPU tile took $ms ms; trying the GPU")
                     return null
                 }
                 Log.i(TAG, "AI upscale runs on the $chip ($asset), $ms ms per tile")
-                upscaler
+                ready = true
+                return ai
             } catch (e: Throwable) {
-                // Includes a missing or mismatched native library (UnsatisfiedLinkError) and
-                // the Tensor service refusing the app (edgetpu_app_service error 16).
                 Log.w(TAG, "AI upscale: $chip failed to load $asset", e)
-                runCatching { model?.close() }
-                runCatching { env?.close() }
-                null
+                return null
+            } finally {
+                if (!ready) handles.asReversed().forEach { runCatching { it.close() } }
             }
         }
 
         private fun load(context: Context): AiUpscaler? {
-            if (hasAsset(context, MODEL_G5))
+            if (Build.VERSION.SDK_INT >= 31 && Process.is64Bit() &&
+                Build.SOC_MODEL.trim().substringAfterLast(' ').equals("G5", ignoreCase = true) &&
+                hasAsset(context, MODEL_G5)
+            ) {
                 attempt(context, MODEL_G5, Accelerator.NPU, "TPU", npu = true)?.let { return it }
+            }
             if (!hasAsset(context, MODEL)) {
                 Log.w(TAG, "AI upscale: $MODEL is missing; run scripts/fetch_models.sh")
                 return null
             }
+            // The bridge can load only in a 32-bit Intel process, including from an ABI split.
+            if (!Process.is64Bit() && X86TileInterpreter.available) {
+                return openX86(context)
+            }
             return attempt(context, MODEL, Accelerator.GPU, "GPU", npu = false)
                 ?: attempt(context, MODEL, Accelerator.CPU, "CPU", npu = false)
                 ?: null.also { Log.w(TAG, "AI upscale unavailable; backgrounds stay as they are") }
+        }
+
+        private fun openX86(context: Context): AiUpscaler? {
+            var handle = 0L
+            return try {
+                val output = FloatArray(OUT * OUT * 3)
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+                handle = X86TileInterpreter.open(context.assets, MODEL, threads)
+                check(handle != 0L) { "Could not open the x86 CPU model" }
+                val ai = AiUpscaler("CPU") { input ->
+                    check(X86TileInterpreter.run(handle, input, output)) { "x86 CPU inference failed" }
+                    output
+                }
+                ai.runTile(ai.tile)
+                Log.i(TAG, "AI upscale runs on the x86 CPU")
+                ai
+            } catch (e: Throwable) {
+                if (handle != 0L) X86TileInterpreter.close(handle)
+                Log.w(TAG, "AI upscale: x86 CPU failed to load $MODEL", e)
+                null
+            }
         }
 
         /** Short cache-file-safe key for [text]. */

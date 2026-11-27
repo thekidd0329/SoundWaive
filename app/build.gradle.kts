@@ -19,6 +19,15 @@ require(
 
 val hasReleaseSigning = signingValues.values.all { !it.isNullOrBlank() }
 
+// Android ABI to Rust target. Packaging and cross-compilation must agree.
+val androidTargets = mapOf(
+    "arm64-v8a" to "aarch64-linux-android",
+    "armeabi-v7a" to "armv7-linux-androideabi",
+    "x86" to "i686-linux-android",
+    "x86_64" to "x86_64-linux-android",
+)
+val minimumAndroidApi = 26
+
 android {
     namespace = "com.parker.crownpulse"
     compileSdk = 35
@@ -27,12 +36,12 @@ android {
     defaultConfig {
         // Keep the existing identity so this is an update to the original private build.
         applicationId = "com.parker.crownpulse"
-        // Pixel-only build: LiteRT's NPU (Tensor TPU) runtime needs Android 12 and arm64.
-        minSdk = 31
+        minSdk = minimumAndroidApi
         targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 19
         versionName = "1.15.0"
-        ndk { abiFilters += listOf("arm64-v8a") }
+        ndk { abiFilters += androidTargets.keys }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -69,12 +78,21 @@ android {
 // the same version, and an AOT-compiled *_Google_Tensor_G5.tflite must be compiled for it
 // (see docs/AI-UPSCALE.md).
 val litert = "2.3.0"
+// CompiledModel has no 32-bit Intel binary. Use only the x86 C runtime and headers
+// from the Interpreter distribution so its older Java API never enters the app.
+val x86Interpreter = configurations.create("x86Interpreter") {
+    isCanBeConsumed = false
+    isTransitive = false
+}
 
 dependencies {
     implementation("com.google.ai.edge.litert:litert:$litert")
     implementation("com.google.ai.edge.litert:litert-gpu:$litert")
     implementation("com.google.ai.edge.litert:litert-npu-runtime-google-tensor:$litert")
+    add(x86Interpreter.name, "com.google.ai.edge.litert:litert:1.4.2@aar")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("junit:junit:4.13.2")
 }
 
 // LiteRT 2.3.0's Kotlin API is compiled with metadata 2.4. AGP 9.4 ships Kotlin 2.2,
@@ -93,6 +111,10 @@ val nativeEngine =
             rootProject.file("rust-toolchain.toml"),
         )
         inputs.property("ndkVersion", "28.2.13676358")
+        val x86Bridge = file("src/main/c/x86_upscale.c")
+        inputs.files(x86Interpreter, x86Bridge)
+        inputs.property("androidTargets", androidTargets)
+        inputs.property("minimumAndroidApi", minimumAndroidApi)
         outputs.dir(layout.buildDirectory.dir("rust-jni"))
         doLast {
             val local =
@@ -115,18 +137,35 @@ val nativeEngine =
             val ndk = file("$sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/$host/bin")
             require(ndk.isDirectory) { "Install Android NDK 28.2.13676358; expected $ndk" }
             val targetDir = rootProject.layout.buildDirectory.dir("rust-target").get().asFile
-            val targets =
-                // arm64 only (Pixel-only build, see abiFilters).
-                mapOf("aarch64-linux-android" to "arm64-v8a")
-            for ((target, abi) in targets) {
+            val cpuRuntime = File(temporaryDir, "x86-interpreter")
+            copy {
+                from(zipTree(x86Interpreter.singleFile))
+                include("headers/**", "jni/x86/libtensorflowlite_jni.so")
+                into(cpuRuntime)
+            }
+            for ((abi, target) in androidTargets) {
                 val clangTarget =
                     if (target == "armv7-linux-androideabi") "armv7a-linux-androideabi" else target
                 val linker =
                     File(
                         ndk,
-                        "${clangTarget}26-clang" + if (host.startsWith("windows")) ".cmd" else "",
+                        "${clangTarget}${minimumAndroidApi}-clang" + if (host.startsWith("windows")) ".cmd" else "",
                     )
                 require(linker.isFile) { "Android linker not found: $linker" }
+                if (abi == "x86") {
+                    val libDir = layout.buildDirectory.dir("rust-jni/x86").get().asFile
+                    val runtime = File(cpuRuntime, "jni/x86/libtensorflowlite_jni.so")
+                    libDir.mkdirs()
+                    runtime.copyTo(File(libDir, runtime.name), overwrite = true)
+                    val bridge = File(libDir, "libsoundwaive_x86_sharpen.so")
+                    val compile = ProcessBuilder(
+                        linker.absolutePath, "-std=c11", "-O2", "-fPIC", "-shared",
+                        "-Wall", "-Wextra", "-Werror", "-Wl,--no-undefined",
+                        "-Wl,-z,max-page-size=16384", "-I${cpuRuntime.absolutePath}/headers",
+                        x86Bridge.absolutePath, runtime.absolutePath, "-landroid", "-o", bridge.absolutePath,
+                    )
+                    check(compile.inheritIO().start().waitFor() == 0) { "Failed to build x86 sharpening" }
+                }
                 val process =
                     ProcessBuilder(
                             "cargo",
