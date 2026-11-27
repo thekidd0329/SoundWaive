@@ -101,6 +101,7 @@ object ReleasePack {
             }
         }
         if (item.seedOffset != 0) s.set("seed", (s.i("seed") + item.seedOffset) % 100_000_000)
+        if (!item.lyricsByDefault && !base.b("lyricsCanvas")) s.set("lyrics", false)
         return s
     }
 

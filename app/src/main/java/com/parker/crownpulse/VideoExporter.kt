@@ -59,6 +59,8 @@ class VideoExporter(private val context: Context) {
         val fx: PostFx,
         /** Set when the video background decodes straight into [post]'s texture. */
         val video: VideoBackground?,
+        /** The lyrics layer's strip bitmap (owned here, uploaded by [post]). */
+        val lyrics: LyricsOverlay.Strip?,
     ) {
         fun close() {
             try {
@@ -68,6 +70,7 @@ class VideoExporter(private val context: Context) {
             }
             video?.useBitmaps()
             post.release()
+            lyrics?.release()
         }
     }
 
@@ -96,9 +99,19 @@ class VideoExporter(private val context: Context) {
         var post: GpuPost? = null
         var title: Bitmap? = null
         var video: VideoBackground? = null
+        var lyrics: LyricsOverlay.Strip? = null
         try {
             title = renderer.titleLayer(work.width, work.height, s)
-            val program = GpuPost(renderer.paperImage, title, outWidth)
+            // Lyrics are drawn at the output's full width (not the working size) so the words
+            // stay sharp when the scene is rendered smaller and scaled up.
+            val overlay = renderer.lyrics
+            if (LyricsOverlay.visible(s, overlay)) {
+                val limit = IntArray(1)
+                GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, limit, 0)
+                val pixels = minOf(outWidth, limit[0].coerceAtLeast(2048))
+                lyrics = LyricsOverlay.Strip(overlay!!, s, 1080f * work.height / work.width, pixels)
+            }
+            val program = GpuPost(renderer.paperImage, title, outWidth, lyrics)
             post = program
             val fx = PostFx()
             val source = renderer.background as? VideoBackground
@@ -109,11 +122,12 @@ class VideoExporter(private val context: Context) {
             fx.ownsBase = s.s("backgroundType") == BackgroundMath.COLOR || video != null
             val recorder = SceneRecorder(canvas, work.width, work.height)
             Log.i(TAG, "GPU effects on (zero-copy video: ${video != null})")
-            return Effects(recorder, program, fx, video)
+            return Effects(recorder, program, fx, video, lyrics)
         } catch (e: Exception) {
             Log.w(TAG, "GPU effects unavailable; using the Canvas path", e)
             video?.useBitmaps()
             post?.release()
+            lyrics?.release()
             return null
         } finally {
             title?.recycle()

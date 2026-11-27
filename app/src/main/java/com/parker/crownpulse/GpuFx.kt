@@ -54,6 +54,10 @@ class PostFx {
     var vignette = 0f
     var fade = 0f
 
+    /** Lyrics layer: on for this frame, and the music time it shows (see [LyricsOverlay]). */
+    var lyricsOn = false
+    var lyricsTime = 0f
+
     companion object {
         /** [a] rounded like Paint.setAlpha((a * 255).toInt()). */
         fun alpha(a: Float): Float = (a * 255).toInt().coerceIn(0, 255) / 255f
@@ -103,8 +107,9 @@ internal class SceneRecorder(surface: Surface, private val width: Int, private v
 /**
  * The GPU export pass: one OpenGL ES 3.0 fragment shader that puts the background color,
  * the video background (sampled straight from the decoder's texture), paper grain, the
- * scene, build-up darkening, the drop flash, grain specks, the vignette, the titles and the
- * fades together in one pass, written straight into the video encoder's surface.
+ * scene, the lyrics (at the [LayerOrder] position), build-up darkening, the drop flash,
+ * grain specks, the vignette, the titles and the fades together in one pass, written
+ * straight into the video encoder's surface.
  *
  * Written for tile-based mobile GPUs such as the Tensor G5's PowerVR: no loops, no
  * texelFetch on external textures, no glFinish, clamp-to-edge sampling at any size, one
@@ -116,11 +121,17 @@ internal class SceneRecorder(surface: Surface, private val width: Int, private v
  * Needs the encoder's OpenGL ES 3 context to be current. [frameWidth] is the output width
  * in pixels in display orientation.
  */
-internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
+internal class GpuPost(
+    paper: Bitmap,
+    title: Bitmap?,
+    frameWidth: Int,
+    /** The lyrics layer's strip, redrawn and re-uploaded only when its words change. */
+    private val lyrics: LyricsOverlay.Strip? = null,
+) {
     private var program = 0
     private var blurProgram = 0
     private val pixel = 1080f / frameWidth
-    private val textures = IntArray(4) // paper, titles, blur, video (external)
+    private val textures = IntArray(5) // paper, titles, blur, video (external), lyrics
     private var blurFramebuffer = 0
     private val hasTitle = title != null
     private var video: SurfaceTexture? = null
@@ -153,12 +164,15 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
     private var uVignette = -1
     private var uTitleOn = -1
     private var uFade = -1
+    private var uLyricsOn = -1
+    private var uLyricsTop = -1
+    private var uLyricsRect = -1
 
     init {
         try {
             program = link(VERTEX, FRAGMENT)
             blurProgram = link(BLUR_VERTEX, BLUR_FRAGMENT)
-            GLES20.glGenTextures(4, textures, 0)
+            GLES20.glGenTextures(5, textures, 0)
             for (i in 0..2) {
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[i])
                 clampLinear(GLES20.GL_TEXTURE_2D)
@@ -175,6 +189,10 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
             )
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textures[3])
             clampLinear(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[4])
+            clampLinear(GLES20.GL_TEXTURE_2D)
+            if (lyrics != null) GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, lyrics.bitmap, 0)
+            else blank()
             val fb = IntArray(1)
             GLES20.glGenFramebuffers(1, fb, 0)
             blurFramebuffer = fb[0]
@@ -211,6 +229,9 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
             uVignette = u("uVignette")
             uTitleOn = u("uTitleOn")
             uFade = u("uFade")
+            uLyricsOn = u("uLyricsOn")
+            uLyricsTop = u("uLyricsTop")
+            uLyricsRect = u("uLyricsRect")
             // Fixed texture units, one per sampler (samplers of different types must never
             // share a unit).
             GLES20.glUseProgram(program)
@@ -219,6 +240,7 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
             GLES20.glUniform1i(u("uBlur"), 2)
             GLES20.glUniform1i(u("uPaper"), 3)
             GLES20.glUniform1i(u("uTitle"), 4)
+            GLES20.glUniform1i(u("uLyrics"), 5)
             GLES20.glUseProgram(blurProgram)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(blurProgram, "uTex"), 1)
             GLES20.glUseProgram(0)
@@ -300,6 +322,12 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0])
         GLES20.glActiveTexture(GLES20.GL_TEXTURE4)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[1])
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE5)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[4])
+        val strip = lyrics
+        val showLyrics = fx.lyricsOn && strip != null
+        if (showLyrics && strip!!.update(fx.lyricsTime))
+            GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, strip.bitmap)
         GLES20.glUniformMatrix4fv(uST, 1, false, sceneMatrix, 0)
         GLES20.glUniformMatrix4fv(uVideoST, 1, false, videoMatrix, 0)
         GLES20.glUniform2f(uFrame, 1080f, frameH)
@@ -333,6 +361,9 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
         )
         GLES20.glUniform1f(uTitleOn, if (hasTitle) 1f else 0f)
         GLES20.glUniform1f(uFade, fx.fade)
+        GLES20.glUniform1f(uLyricsOn, if (showLyrics) 1f else 0f)
+        GLES20.glUniform1f(uLyricsTop, if (LayerOrder.lyrics == LyricsZ.TOP) 1f else 0f)
+        if (strip != null) GLES20.glUniform4f(uLyricsRect, 0f, strip.top, 1f, strip.bottom)
         vertices.position(0)
         coords.position(0)
         GLES20.glEnableVertexAttribArray(aPosition)
@@ -352,7 +383,7 @@ internal class GpuPost(paper: Bitmap, title: Bitmap?, frameWidth: Int) {
         video = null
         if (blurFramebuffer != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(blurFramebuffer), 0)
         blurFramebuffer = 0
-        if (textures[0] != 0) GLES20.glDeleteTextures(4, textures, 0)
+        if (textures[0] != 0) GLES20.glDeleteTextures(5, textures, 0)
         textures.fill(0)
         if (program != 0) GLES20.glDeleteProgram(program)
         program = 0
@@ -468,6 +499,7 @@ uniform mediump samplerExternalOES uVideo;
 uniform lowp sampler2D uBlur;
 uniform lowp sampler2D uPaper;
 uniform lowp sampler2D uTitle;
+uniform lowp sampler2D uLyrics;
 uniform highp mat4 uVideoST;
 uniform highp vec2 uFrame;
 uniform highp vec2 uShake;
@@ -487,6 +519,9 @@ uniform float uGrainAlpha;
 uniform highp vec4 uVignette;
 uniform float uTitleOn;
 uniform float uFade;
+uniform float uLyricsOn;
+uniform float uLyricsTop;
+uniform highp vec4 uLyricsRect;
 in highp vec2 vScene;
 in highp vec2 vScreen;
 out vec4 fragColor;
@@ -510,6 +545,12 @@ highp vec2 rectUv(highp vec2 p, highp vec4 r) {
     return clamp((p - r.xy) / (r.zw - r.xy), 0.0, 1.0);
 }
 
+// The lyrics strip (premultiplied), in plain screen space: never shaken or mirrored.
+vec3 lyricsOver(vec3 c, highp vec2 p) {
+    vec4 l = texture(uLyrics, rectUv(p, uLyricsRect)) * inside(p, uLyricsRect);
+    return l.rgb + c * (1.0 - l.a);
+}
+
 void main() {
     highp vec2 screen = vScreen;
     // Background color, blurred edges, video and paper grain (when this pass owns them).
@@ -531,6 +572,8 @@ void main() {
     // The scene, premultiplied, over the base.
     vec4 scene = texture(uScene, vScene);
     vec3 color = scene.rgb + base * (1.0 - scene.a);
+    // LyricsZ.ABOVE_SYMBOL: right above the scene (and its symbol).
+    if (uLyricsOn > 0.0 && uLyricsTop < 0.5) color = lyricsOver(color, screen);
     // Build-up darkening and the drop flash cover the whole frame.
     color *= 1.0 - uDark;
     color = mix(color, uWhite, uFlash);
@@ -564,6 +607,8 @@ void main() {
         vec4 title = texture(uTitle, clamp(tuv, 0.0, 1.0)) * inside(tuv, vec4(0.0, 0.0, 1.0, 1.0));
         color = title.rgb + color * (1.0 - title.a);
     }
+    // LyricsZ.TOP: above titles and full-frame effects, under the fade.
+    if (uLyricsOn > 0.0 && uLyricsTop > 0.5) color = lyricsOver(color, screen);
     color = mix(color, uBg, uFade * inside(layer, frame));
     fragColor = vec4(color, 1.0);
 }

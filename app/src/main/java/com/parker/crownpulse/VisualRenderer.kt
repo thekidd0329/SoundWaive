@@ -14,6 +14,8 @@ class VisualRenderer(context: Context) {
     var backdrop: Bitmap? = null
     /** Bottom layer: color, photo, GIF or video frame chosen by music time. */
     var background: BackgroundSource? = null
+    /** Word-timed lyrics for this song (null = none); shown when the look's "lyrics" is on. */
+    var lyrics: LyricsOverlay? = null
     private val blur = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
     private val blurCanvas = Canvas(blur)
     private val blurRect = RectF()
@@ -994,9 +996,14 @@ class VisualRenderer(context: Context) {
                     (s.f("vignette") * 200).toInt().coerceIn(0, 255) / 255f
                 else 0f
             post.fade = if (fade > 0) PostFx.alpha(fadeAlpha) else 0f
+            // The GPU pass draws the lyrics layer from its own strip texture (see GpuPost).
+            post.lyricsOn = LyricsOverlay.visible(s, lyrics)
+            post.lyricsTime = t
             c.restore()
             return
         }
+        // Lyrics directly above the symbol and scene (LayerOrder hook, see LyricsZ).
+        if (LayerOrder.lyrics == LyricsZ.ABOVE_SYMBOL) drawLyrics(c, t, s, shakeX, shakeY)
         // The frame darkens a little as the build-up tightens, so the drop lands brighter.
         if (dark > .005f) rect(c, -100f, -100f, 1280f, h + 200f, Color.BLACK, dark)
         // Flash on drops: the whole frame lights up and fades within DROP_LIFE. Drawn a bit
@@ -1036,8 +1043,29 @@ class VisualRenderer(context: Context) {
             p.shader = null
         }
         drawText(c, s)
+        // Lyrics above titles and full-frame effects, under the fade (LayerOrder hook).
+        if (LayerOrder.lyrics == LyricsZ.TOP) drawLyrics(c, t, s, shakeX, shakeY)
         if (fade > 0) rect(c, 0f, 0f, 1080f, h, bg, fadeAlpha)
         c.restore()
+    }
+
+    /**
+     * The lyrics layer on the Canvas path (preview and CPU export). The frame is shaken and
+     * maybe mirrored at this point; both are undone so the words stay still and readable,
+     * exactly like the GPU pass, which samples them in plain screen space.
+     */
+    private fun drawLyrics(c: Canvas, t: Float, s: Settings, shakeX: Float, shakeY: Float) {
+        val overlay = lyrics ?: return
+        if (!LyricsOverlay.visible(s, overlay)) return
+        val save = c.save()
+        if (s.b("mirror")) {
+            // The mirror transform is its own inverse.
+            c.translate(1080f, 0f)
+            c.scale(-1f, 1f)
+        }
+        c.translate(-shakeX, -shakeY)
+        overlay.draw(c, h, t, s)
+        c.restoreToCount(save)
     }
 
     /** Paper texture for the GPU pass's grain (the same image the Canvas path draws). */
