@@ -32,7 +32,7 @@ Transparent PNGs work best for custom symbols. Disable **Tint imported artwork**
 
 ## Practical notes
 
-- Imported audio caches and exported videos use additional storage. A four-minute video at 12 Mbps is roughly 370 MB.
+- Imported audio caches and exported videos use additional storage. A four-minute video at 12 Mbps is roughly 370 MB. Temporary cache (decoded audio, export scratch and AI video frames) is cleared when you open the app and after each export. Export › Storage shows the size and has Clear cache; saved looks and photos are not removed.
 - Music stays on your device. There is no account, upload, subscription or Internet permission.
 - Beat timing, energy and approximate bass pitches come from local analysis. The flying notes are expressive animation, not verified sheet music.
 - Mono/stereo tracks up to 30 minutes are supported. Codec availability and export speed depend on the phone. If a size/frame-rate combination is unsupported, try 720p at 30 fps.
