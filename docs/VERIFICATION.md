@@ -31,7 +31,7 @@ CI results are recorded separately. They are not a substitute for a device test.
 
 Everything else Christian tested on 1.0 through 1.11 worked smoothly.
 
-## 1.12.x, 1.13.x and 1.14.0
+## 1.12.x through 1.15.0
 
 These builds are awaiting Christian's device test.
 
@@ -42,6 +42,7 @@ These builds are awaiting Christian's device test.
 | 1.13.0 | 2026-11-19 | Awaiting Christian's device test | AI background sharpening (LiteRT). The 1.13.0 GitHub Actions run failed to compile because LiteRT 2.3.0's Kotlin metadata is newer than the bundled compiler. |
 | 1.13.1 | 2026-11-21 | Awaiting Christian's device test | Adds `-Xskip-metadata-version-check` so that LiteRT compile can proceed, and includes 1.12.1. Not yet compiled, because of a CI download flake. |
 | 1.14.0 | 2026-11-21 | Awaiting Christian's device test | Background export: a `mediaProcessing` foreground service so a render keeps going when the app leaves the screen. |
+| 1.15.0 | 2026-11-26 | Awaiting Christian's device test | Release Pack: one tap renders YouTube 16:9 (4K or 1080p), three distinct 15 s verticals, a 30 s reel, a square promo and a silent 8 s looping Spotify Canvas to Movies/SoundWaive/<song>/. Not built or run locally; awaiting CI and Christian's on-device test. |
 
 GitHub Actions history for a given commit is at the [Android workflow runs](https://github.com/thekidd0329/SoundWaive/actions/workflows/android.yml).
 

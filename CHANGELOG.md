@@ -1,5 +1,36 @@
 # Changes
 
+## [1.15.0] - 2026-11-26
+
+### Added
+- **Release Pack** (Export › Release Pack). One tap after importing a song renders seven videos with the current look, symbol and background, and saves them to `Movies/SoundWaive/<song>/` through MediaStore (no storage permission):
+
+  | File | Shape and size | Length | Audio |
+  | --- | --- | --- | --- |
+  | `<song>_YouTube_16x9.mp4` | 16:9, 3840 × 2160 (or 1920 × 1080) | full song | AAC |
+  | `<song>_Vertical15_A.mp4`, `_B`, `_C` | 9:16, 1080 × 1920 | 15 s each | AAC, short fades |
+  | `<song>_Reel_30s.mp4` | 9:16, 1080 × 1920 | 30 s | AAC, short fades |
+  | `<song>_Square.mp4` | 1:1, 1080 × 1080 | 30 s (15 / 30 / 60 s setting) | AAC, short fades |
+  | `<song>_Canvas_8s.mp4` | 9:16, 1080 × 1920 | whole bars, 3 to 8 s | none (Spotify Canvas) |
+
+  - The song is analyzed once at import, as before. The pack reuses that analysis (loudness, bass, beat grid and drops) and runs all seven renders one after another in `ExportService`, with one notification that shows overall progress, the clip being rendered and Cancel. It keeps going with the app in the background.
+  - Window choice is in `ReleasePlan.kt`, which is pure Kotlin, deterministic and covered by `ReleasePlanTest`. The analysis is read in Kotlin (the Rust engine only writes the file), so the picker lives next to `BeatFx.findDrops`. Every clip starts on a downbeat. Vertical A is the strongest 15 s, with a bonus for a drop early in the window. B is the hook: the strongest 15 s before A. C is the strongest 15 s at least 10 s away from A and B, so it comes from another section. The reel is the strongest 30 s. The square avoids the reel's window when the song is long enough. The three verticals never overlap when the song has room; on a short song, the least-overlapping windows are used. See `docs/RELEASE-PACK.md`.
+  - The three verticals use variation seeds +0, +1 and +2, so their scene colors and particle layouts differ.
+  - **Spotify Canvas loop.** The window is a whole number of bars at the song's tempo, inside Vertical A. The last 0.5 s crossfades into the 0.5 s just before the window (rendered first and held), so the last frame leads straight into the first. It renders at up to 30 fps, has no audio track, and uses the CPU drawing path (two scene renders per blended frame).
+  - **Reframing.** Each clip uses its own frame shape, with the background cover-cropped (no letterbox or blurred bars). In wide frames the symbol and everything sized from it scale with the frame height, so the crown stays centered and whole. The look's position sliders still place it relative to the frame.
+  - **4K.** The YouTube video is 3840 × 2160 at 45 Mbps (68 Mbps at 60 fps, YouTube's recommended SDR rates) when the phone's H.264 encoder accepts that size, frame rate and bitrate. Otherwise it falls back to 1920 × 1080 and says so. "YouTube resolution" can be set to 1080p.
+  - A results list on the Export screen has Play and Share for each video, plus Share all. It is kept across restarts. If one clip fails, the rest still render and the failure is listed. Cancel keeps the clips already saved.
+- `VideoExporter.Options`: output size, bitrate, frame rate, video-only output, audio fades and loop crossfade per render. The defaults leave a normal export unchanged.
+
+### Changed
+- Exports request H.264 **High** profile when the encoder lists it, at the highest level it lists, and fall back to the encoder default if configure refuses it. This applies to normal exports too.
+- `ExportJob.output` is now optional (a Release Pack has no picked file), and `ExportStatus.PackFinished` reports a pack.
+
+### Notes
+- Audio stays at the song's own sample rate (AAC-LC, 320 kb/s stereo). SoundWaive has no resampler, so a 44.1 kHz song is not converted to 48 kHz; both are accepted by YouTube, Instagram and TikTok.
+- The render-quality setting still applies, so with "Balanced (720p)" a 4K video is drawn at 720p and scaled up on the GPU. Choose "Full (original)" for a native 4K render.
+
+
 ## [1.14.0] - 2026-11-21
 
 ### Added

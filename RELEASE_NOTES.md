@@ -1,5 +1,28 @@
 # SoundWaive release notes
 
+## 1.15.0 — Release Pack
+
+**What's new**
+- **Release Pack: seven videos from one song.** Import a song, set up your look, then tap **Render Release Pack**. SoundWaive makes:
+  - the full song for YouTube (16:9, 4K when your phone can, otherwise 1080p)
+  - three different 15-second vertical promos
+  - a 30-second Instagram reel
+  - a square promo (30 seconds, or 15 or 60)
+  - an 8-second looping Spotify Canvas with no sound
+- Clips start on the beat at the song's strongest parts, the main chorus or drop, the hook before it, and another lift later on, with short fades so nothing cuts off hard. The three vertical promos use different color variations.
+- The Canvas loops cleanly. Its length is a whole number of bars, and the end blends into the start.
+- Everything is saved to **Movies/SoundWaive/<song name>**, with clear names like `MySong_Reel_30s.mp4`. When it's done, each video has Play and Share buttons, and there's Share all.
+
+**Where to find it**
+- **Export › Release Pack**. You can pick the YouTube resolution and the square promo length there.
+
+**Good to know**
+- One notification shows the overall progress and lets you cancel. You can leave the app while it renders. If you cancel, videos that already finished stay saved.
+- The start and end times on the Export screen don't apply to the pack, since it picks its own sections.
+- The crown is reframed for each shape and stays centered in the wide YouTube video. Backgrounds fill every shape, with no black bars.
+- For a sharper 4K video, set render quality to **Full (original)**. It takes longer.
+
+
 ## 1.14.0 — Export in the background
 
 **What's new**

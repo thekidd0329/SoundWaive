@@ -30,8 +30,8 @@ android {
         // Pixel-only build: LiteRT's NPU (Tensor TPU) runtime needs Android 12 and arm64.
         minSdk = 31
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.14.0"
+        versionCode = 19
+        versionName = "1.15.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     compileOptions {
