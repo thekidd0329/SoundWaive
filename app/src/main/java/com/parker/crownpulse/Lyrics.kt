@@ -214,7 +214,16 @@ object LyricsStore {
  * storage because the engine reads them by path.
  */
 object LyricsAligner {
-    private val ASSETS = listOf("scores.onnx", "voice.onnx", "cmudict-nostress.txt.gz")
+    // Asset name in the APK → filename written into the model folder.
+    // AAPT/AGP strips a trailing ".gz" from asset names, so the dictionary is
+    // stored as cmudict-nostress.dict and copied to cmudict-nostress.txt.gz,
+    // which is the name the engine reads.
+    private val ASSETS =
+        listOf(
+            "scores.onnx" to "scores.onnx",
+            "voice.onnx" to "voice.onnx",
+            "cmudict-nostress.dict" to "cmudict-nostress.txt.gz",
+        )
     /** Upstream's VAD threshold used when "Skip instrumental parts" is on. */
     const val VAD_THRESHOLD = 5f
 
@@ -232,12 +241,12 @@ object LyricsAligner {
         dir.mkdirs()
         val stamp = File(dir, "version")
         val version = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
-        if (stamp.exists() && stamp.readText() == version && ASSETS.all { File(dir, it).length() > 0 })
+        if (stamp.exists() && stamp.readText() == version && ASSETS.all { File(dir, it.second).length() > 0 })
             return dir
-        for (name in ASSETS) {
+        for ((asset, name) in ASSETS) {
             val target = File(dir, name)
             val tmp = File(dir, "$name.tmp")
-            context.assets.open("lyrics/$name").use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 16) } }
+            context.assets.open("lyrics/$asset").use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 16) } }
             if (!tmp.renameTo(target)) {
                 target.delete()
                 check(tmp.renameTo(target)) { "Couldn’t prepare the lyrics models." }

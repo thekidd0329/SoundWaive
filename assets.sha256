@@ -3,5 +3,5 @@
 47dbfe34c3492e6f7f7fb2b0ed99794e8e41215c2177821f03e0f5304e4b9846  app/src/main/assets/models/real_esrgan_general_x4v3.tflite
 c281e263875ea8f854f1e28245ded24d896a42a1ce56b08412ea43b9bcf403e9  app/src/main/assets/lyrics/scores.onnx
 f3f24482b7a8e279e5f04c34acd22b69ce74de33d26ca9e8d1ba81b158330439  app/src/main/assets/lyrics/voice.onnx
-5ad6f08f9dbca65879eafd3f6a75087f80f980577451eea00efb483b85afa443  app/src/main/assets/lyrics/cmudict-nostress.txt.gz
-c1ef81cbd0467e4554f1b479764828ed2cce14888e0226e837038ab56308d93f  app/src/main/assets/lyrics/NOTICE.txt
+5ad6f08f9dbca65879eafd3f6a75087f80f980577451eea00efb483b85afa443  app/src/main/assets/lyrics/cmudict-nostress.dict
+87b9524790f961be6b6349511ac301d511e5a36f6914d5cf005a87a2f04a413d  app/src/main/assets/lyrics/NOTICE.txt

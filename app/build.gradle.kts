@@ -55,7 +55,11 @@ android {
     // Extracted native libraries: LiteRT finds the Tensor dispatch library on disk.
     packaging { jniLibs.useLegacyPackaging = true }
     // Models are memory-mapped from the APK, so keep them uncompressed.
-    androidResources { noCompress += "tflite" }
+    androidResources {
+        noCompress += "tflite"
+        noCompress += "onnx"
+        noCompress += "dict"
+    }
     signingConfigs {
         if (hasReleaseSigning)
             create("privateRelease") {
