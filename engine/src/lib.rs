@@ -1,9 +1,11 @@
-//! Deterministic, offline music analysis. No network and no learned model.
+//! Deterministic, offline music analysis. No network and no learned model. The optional
+//! `lyrics` feature adds offline word-timed lyrics alignment (see [lyrics]).
 //!
 //! Output is the versioned `CPULSE01` file read by `Models.kt`, optionally followed by a
 //! `SWBEAT01` beat-grid section that older readers ignore (they stop after the onset list).
 pub mod beat;
 pub mod dsp;
+pub mod lyrics;
 pub mod onset;
 
 use dsp::{fft, hann, load_frame, normalize, quantile, smooth, Complex};
@@ -272,6 +274,68 @@ pub extern "system" fn Java_com_parker_crownpulse_NativeEngine_analyze(
         Ok(())
     })();
     env.new_string(result.err().unwrap_or_default())
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_parker_crownpulse_NativeEngine_lyricsAvailable(
+    _env: jni::JNIEnv,
+    _class: jni::objects::JObject,
+) -> jni::sys::jboolean {
+    lyrics::available() as jni::sys::jboolean
+}
+/// Aligns lyrics to the decoded song. Takes the interleaved 16-bit PCM file the importer
+/// wrote, so the song never crosses JNI as one huge array. Returns JSON (see [lyrics]).
+#[cfg(target_os = "android")]
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_com_parker_crownpulse_NativeEngine_alignLyrics(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JObject,
+    pcm: jni::objects::JString,
+    sample_rate: jni::sys::jint,
+    channels: jni::sys::jint,
+    text: jni::objects::JString,
+    model_dir: jni::objects::JString,
+    vad_threshold: jni::sys::jfloat,
+    stability: jni::sys::jboolean,
+) -> jni::sys::jstring {
+    let json = (|| -> Result<String, String> {
+        let pcm: String = env.get_string(&pcm).map_err(|e| e.to_string())?.into();
+        let text: String = env.get_string(&text).map_err(|e| e.to_string())?.into();
+        let dir: String = env
+            .get_string(&model_dir)
+            .map_err(|e| e.to_string())?
+            .into();
+        #[cfg(feature = "lyrics")]
+        {
+            Ok(lyrics::align_json(&lyrics::Request {
+                pcm: Path::new(&pcm),
+                sample_rate: sample_rate.max(0) as u32,
+                channels: channels.max(1) as usize,
+                lyrics: &text,
+                model_dir: Path::new(&dir),
+                vad_threshold: vad_threshold.max(0.0),
+                stability: stability != 0,
+            }))
+        }
+        #[cfg(not(feature = "lyrics"))]
+        {
+            let _ = (
+                pcm,
+                text,
+                dir,
+                sample_rate,
+                channels,
+                vad_threshold,
+                stability,
+            );
+            Err("Lyrics are not available on this phone's processor.".into())
+        }
+    })()
+    .unwrap_or_else(|e| format!("{{\"error\":{:?}}}", e));
+    env.new_string(json)
         .map(|s| s.into_raw())
         .unwrap_or(std::ptr::null_mut())
 }

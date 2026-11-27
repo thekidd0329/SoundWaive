@@ -19,6 +19,8 @@ class ExportJob(
     val aiPhoto: Bitmap?,
     val aiPhotoChip: String?,
     val pack: Boolean = false,
+    /** Word-timed lyrics for this song, drawn when the look's "lyrics" switch is on. */
+    val lyrics: LyricTimings? = null,
 )
 
 sealed class ExportStatus {

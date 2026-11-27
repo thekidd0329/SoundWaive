@@ -92,6 +92,12 @@ class MainActivity : Activity() {
     private var closing = false
     private var savedPlayback = false
     private val prefs by lazy { getSharedPreferences("crownpulse", MODE_PRIVATE) }
+    /** Word timings for the current song (null = not aligned yet); see [LyricsStore]. */
+    private var lyricTimings: LyricTimings? = null
+    /** Lyrics text being edited for the current song. */
+    private var lyricsDraft = ""
+    private var lyricsEdit: EditText? = null
+    private var recognizer: android.speech.SpeechRecognizer? = null
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -535,6 +541,8 @@ class MainActivity : Activity() {
                 prepareAsync()
             }
         seek.progress = 0
+        if (old != null) saveLyricsDraft(old)
+        loadLyrics(t)
         settings.set("trimStart", 0)
         settings.set("trimEnd", 0)
         settings.set("syncOffset", 0)
@@ -653,8 +661,9 @@ class MainActivity : Activity() {
         val resetScroll = page != name
         page = name
         tabs.removeAllViews()
-        for (tab in listOf("Studio", "Look", "Motion", "Export")) {
+        for (tab in listOf("Studio", "Look", "Motion", "Lyrics", "Export")) {
             val b = button(tab, tab == name) { showPage(tab) }
+            b.setPadding(dp(4), 0, dp(4), 0)
             tabs.addView(
                 b,
                 LinearLayout.LayoutParams(0, dp(38), 1f).apply {
@@ -667,6 +676,7 @@ class MainActivity : Activity() {
             "Studio" -> studio()
             "Look" -> look()
             "Motion" -> motion()
+            "Lyrics" -> lyricsPage()
             else -> exportPage()
         }
         if (resetScroll)
@@ -1110,6 +1120,470 @@ class MainActivity : Activity() {
         )
     }
 
+    // ---- Lyrics (1.17) ----------------------------------------------------------------
+
+    /** Loads the stored lyrics and timings for [t] and hands them to the preview renderer. */
+    private fun loadLyrics(t: Track) {
+        lyricTimings = LyricsStore.load(this, t.uri)
+        lyricsDraft = lyricTimings?.text ?: LyricsStore.loadDraft(this, t.uri) ?: ""
+        renderer.lyrics = lyricTimings?.let { LyricsOverlay(it) }
+    }
+
+    private fun lyricsChanged() {
+        val t = track ?: return
+        renderer.lyrics = lyricTimings?.let { LyricsOverlay(it) }
+        lyricTimings?.let {
+            try {
+                LyricsStore.save(this, t.uri, it, t.name, t.analysis.duration)
+            } catch (e: Exception) {
+                android.util.Log.w("SoundWaive", "Lyrics not saved", e)
+                toast("Couldn’t save the lyric timings.")
+            }
+        }
+        preview.invalidate()
+    }
+
+    private fun lyricsPage() {
+        section(
+            "Lyrics",
+            "Paste the words (one line per sung line) or dictate them, then Align. Timing runs on your phone with no internet and takes a few seconds per minute of music. Lyrics show karaoke style over the video, above the symbol.",
+        )
+        lyricsEdit = null
+        if (!LyricsAligner.available()) {
+            panel.addView(text("Lyrics aren’t available on this phone’s processor.", 13f, muted))
+            return
+        }
+        val t = track
+        if (t == null || t.pcm == null) {
+            panel.addView(
+                text("Import a song to add lyrics. The demo beat has no vocals.", 13f, muted),
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) },
+            )
+            return
+        }
+        val edit =
+            EditText(this).apply {
+                setText(lyricsDraft)
+                setTextColor(Color.WHITE)
+                setHintTextColor(muted)
+                hint = "Paste lyrics here"
+                textSize = 15f
+                gravity = Gravity.TOP or Gravity.START
+                minLines = 6
+                maxLines = 14
+                isVerticalScrollBarEnabled = true
+                backgroundTintList = ColorStateList.valueOf(muted)
+                inputType =
+                    android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                        android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                contentDescription = "Lyrics"
+                addTextChangedListener(
+                    object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+
+                        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+
+                        override fun afterTextChanged(s: android.text.Editable?) {
+                            lyricsDraft = s?.toString() ?: ""
+                        }
+                    }
+                )
+                setOnFocusChangeListener { _, has -> if (!has) saveLyricsDraft() }
+            }
+        lyricsEdit = edit
+        panel.addView(edit, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        addButtonRow(
+            button("Dictate a line") { dictate() },
+            button(if (lyricTimings == null) "Align lyrics" else "Align again", true) { alignLyrics() },
+        )
+        toggle("Skip instrumental parts (slower)", "lyricsVad")
+        val timings = lyricTimings
+        if (timings != null) {
+            val flagged = timings.words.withIndex().filter { it.value.flagged && !it.value.fixed }
+            val fixed = timings.words.count { it.fixed }
+            section(
+                "Timing",
+                "${timings.words.size} words on ${timings.lineCount} lines" +
+                    (if (fixed > 0) " · $fixed fixed by tap" else "") +
+                    if (flagged.isEmpty()) ". Nothing flagged." else ". ${flagged.size} words may be off; fix them by tapping along.",
+            )
+            if (flagged.isNotEmpty())
+                panel.addView(
+                    text(
+                        flagged.take(24).joinToString("   ") { "${formatTime(it.value.onset)} ${it.value.text}" } +
+                            if (flagged.size > 24) "   …" else "",
+                        12f,
+                        muted,
+                    ),
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) },
+                )
+            val latency = prefs.getFloat("tapLatencyMs", 0f)
+            addButtonRow(
+                button("Fix flagged words", flagged.isNotEmpty()) {
+                    if (flagged.isEmpty()) toast("No flagged words left.") else startTapFix()
+                },
+                button("Calibrate taps · ${latency.roundToInt()} ms") { calibrateTaps() },
+            )
+            addButtonRow(
+                button("Remove timings") {
+                    AlertDialog.Builder(this)
+                        .setTitle("Remove the lyric timings?")
+                        .setMessage("The lyrics text is kept, so you can align again.")
+                        .setPositiveButton("Remove") { _, _ ->
+                            LyricsStore.delete(this, t.uri)
+                            saveLyricsDraft()
+                            lyricTimings = null
+                            renderer.lyrics = null
+                            preview.invalidate()
+                            showPage("Lyrics")
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            )
+        }
+        section("On the video")
+        toggle("Show lyrics", "lyrics")
+        toggle("Lyrics on the Spotify Canvas loop", "lyricsCanvas")
+        select("Position", "lyricsPosition", Settings.LYRICS_POSITIONS)
+        slider("Text size", "lyricsSize", .6f, 1.6f)
+        color("Words", "lyricsColor")
+        color("Word being sung", "lyricsHighlight")
+    }
+
+    private fun saveLyricsDraft(t: Track? = track) {
+        if (t == null) return
+        try {
+            LyricsStore.saveDraft(this, t.uri, lyricsDraft)
+        } catch (e: Exception) {
+            android.util.Log.w("SoundWaive", "Lyrics draft not saved", e)
+        }
+    }
+
+    /** Aligns the lyrics off the main thread, with an estimated progress bar. */
+    private fun alignLyrics() {
+        val t = track ?: return
+        if (busy || ExportSession.isRunning()) return
+        val text = lyricsDraft
+        if (!text.any { it.isLetterOrDigit() }) {
+            toast("Paste or dictate the lyrics first.")
+            return
+        }
+        saveLyricsDraft()
+        pause()
+        val vad = settings.b("lyricsVad")
+        startBusy("Getting the lyrics models ready")
+        // The engine has no progress callback; estimate from song length (stability check
+        // runs it twice, skipping instrumental parts about three times as long).
+        val estimate = (4f + t.analysis.duration * (if (vad) .3f else .1f)) * 1000
+        val started = SystemClock.elapsedRealtime()
+        val ticker =
+            object : Runnable {
+                override fun run() {
+                    if (!busy || closing) return
+                    val p = (SystemClock.elapsedRealtime() - started) / estimate
+                    progress("Timing each word to the song", .05f + .9f * (1 - exp(-2.2f * p)))
+                    main.postDelayed(this, 250)
+                }
+            }
+        main.postDelayed(ticker, 600)
+        worker.submit {
+            try {
+                val result = LyricsAligner.align(this, t, text, vad)
+                runOnUiThread {
+                    main.removeCallbacks(ticker)
+                    if (closing) return@runOnUiThread
+                    endBusy()
+                    if (cancel.get() || track !== t) return@runOnUiThread
+                    lyricTimings = result
+                    lyricsChanged()
+                    showPage("Lyrics")
+                    toast(
+                        "${result.words.size} words timed" +
+                            if (result.flaggedCount > 0) " · ${result.flaggedCount} to check" else ""
+                    )
+                }
+            } catch (e: Throwable) {
+                main.removeCallbacks(ticker)
+                fail(e as? Exception ?: RuntimeException(e.message ?: "The lyrics aligner failed.", e))
+            }
+        }
+    }
+
+    /** Dictation for the lyrics text only (never the song): on-device recognition when offered. */
+    private fun dictate() {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            toast("Dictation isn’t available on this phone.")
+            return
+        }
+        if (
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 111)
+            return
+        }
+        pause()
+        recognizer?.destroy()
+        val r =
+            if (
+                Build.VERSION.SDK_INT >= 33 &&
+                    android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+            )
+                android.speech.SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+            else android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = r
+        r.setRecognitionListener(
+            object : android.speech.RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    toast("Listening… say one line of the lyrics")
+                }
+
+                override fun onBeginningOfSpeech() {}
+
+                override fun onRmsChanged(rmsdB: Float) {}
+
+                override fun onBufferReceived(buffer: ByteArray?) {}
+
+                override fun onEndOfSpeech() {}
+
+                override fun onError(error: Int) {
+                    toast(
+                        if (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH)
+                            "Didn’t catch that. Try again."
+                        else "Dictation stopped (error $error). Typing or pasting works too."
+                    )
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val line =
+                        results
+                            ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                            ?.firstOrNull()
+                            ?.trim()
+                    if (line.isNullOrEmpty()) return
+                    lyricsDraft =
+                        if (lyricsDraft.isBlank()) line
+                        else lyricsDraft.trimEnd('\n', ' ') + "\n" + line
+                    lyricsEdit?.setText(lyricsDraft)
+                    saveLyricsDraft()
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {}
+
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            }
+        )
+        r.startListening(
+            Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(
+                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                )
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        )
+    }
+
+    /** The song position right now in seconds, from the player's media clock when it has one. */
+    @Suppress("DEPRECATION")
+    private fun playerTime(): Float {
+        val p = player ?: return position
+        try {
+            val ts = p.timestamp
+            if (ts != null && ts.mediaClockRate > 0f) {
+                val anchor =
+                    if (Build.VERSION.SDK_INT >= 29) ts.anchorSystemNanoTime
+                    else ts.anchorSytemNanoTime // the API 23-28 spelling
+                val elapsed = (System.nanoTime() - anchor) / 1000L
+                return (ts.anchorMediaTimeUs + elapsed * ts.mediaClockRate) / 1e6f
+            }
+        } catch (_: Exception) {}
+        return p.currentPosition / 1000f
+    }
+
+    private fun playFrom(seconds: Float) {
+        val p = player ?: return
+        if (!prepared) return
+        p.seekTo((seconds.coerceAtLeast(0f) * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
+        position = seconds.coerceAtLeast(0f)
+        if (!p.isPlaying) {
+            if (
+                audioManager.requestAudioFocus(focusRequest) !=
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            ) {
+                toast("Audio is busy. Try again in a moment.")
+                return
+            }
+            p.start()
+            play.text = "Ⅱ"
+        }
+    }
+
+    /**
+     * Tap-to-fix: plays the song just before each flagged word; the user taps when the word
+     * is sung. The tap is moved back by the calibrated latency, snapped to the nearest onset
+     * (spectral flux, ±120 ms) and kept between its neighbours.
+     */
+    private fun startTapFix() {
+        val t = track ?: return
+        val timings = lyricTimings ?: return
+        val pcm = t.pcm ?: return
+        if (!prepared) {
+            toast("The song is still loading. Try again in a moment.")
+            return
+        }
+        val queue = timings.words.indices.filter { timings.words[it].flagged && !timings.words[it].fixed }
+        if (queue.isEmpty()) return
+        var at = 0
+        var tapped = 0
+        val stop = Runnable { pause() }
+        val box =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(12), dp(20), dp(4))
+            }
+        val counter = text("", 12f, muted)
+        val lineView = text("", 20f, Color.WHITE)
+        lineView.setPadding(0, dp(10), 0, dp(14))
+        box.addView(counter)
+        box.addView(lineView)
+        val tap = button("TAP", true) {}
+        tap.textSize = 22f
+        box.addView(tap, LinearLayout.LayoutParams(-1, dp(120)))
+        val dialog =
+            AlertDialog.Builder(this)
+                .setTitle("Tap when you hear the word")
+                .setView(box)
+                .setPositiveButton("Done", null)
+                .setNeutralButton("Replay", null)
+                .setNegativeButton("Skip", null)
+                .create()
+        fun showWord() {
+            if (at >= queue.size) {
+                dialog.dismiss()
+                return
+            }
+            val index = queue[at]
+            val w = timings.words[index]
+            counter.text = "Word ${at + 1} of ${queue.size} · plays from just before it"
+            val from = timings.lineStarts.last { it <= index }
+            val to = timings.lineStarts.first { it > index }
+            val line = android.text.SpannableStringBuilder()
+            for (i in from until to) {
+                if (i > from) line.append(' ')
+                val start = line.length
+                line.append(timings.words[i].text)
+                if (i == index) {
+                    line.setSpan(
+                        android.text.style.ForegroundColorSpan(acid),
+                        start,
+                        line.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                    line.setSpan(
+                        android.text.style.UnderlineSpan(),
+                        start,
+                        line.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                }
+            }
+            lineView.text = line
+            val start = (w.onset - 2.5f).coerceAtLeast(0f)
+            main.removeCallbacks(stop)
+            playFrom(start)
+            main.postDelayed(stop, ((w.onset + 2.5f - start) * 1000).toLong())
+        }
+        tap.setOnClickListener {
+            if (at >= queue.size || player?.isPlaying != true) return@setOnClickListener
+            val now = playerTime()
+            main.removeCallbacks(stop)
+            pause()
+            val corrected = now - prefs.getFloat("tapLatencyMs", 0f) / 1000f
+            val index = queue[at]
+            val snapped =
+                try {
+                    val from = (corrected - .25f).coerceAtLeast(0f)
+                    val samples = TapFix.readMono(pcm, t.rate, t.channels, from, corrected + .25f)
+                    TapFix.snap(samples, t.rate, from, corrected)
+                } catch (e: Exception) {
+                    android.util.Log.w("SoundWaive", "Onset snap failed", e)
+                    corrected
+                }
+            TapFix.apply(timings.words, index, snapped)
+            tapped++
+            at++
+            showWord()
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { if (at < queue.size) showWord() }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                at++
+                showWord()
+            }
+            showWord()
+        }
+        dialog.setOnDismissListener {
+            main.removeCallbacks(stop)
+            pause()
+            if (tapped > 0) {
+                lyricsChanged()
+                toast("$tapped word${if (tapped == 1) "" else "s"} fixed")
+            }
+            if (page == "Lyrics") showPage("Lyrics")
+        }
+        dialog.show()
+    }
+
+    /**
+     * Measures how late taps land: the song plays from a steady part and the user taps along
+     * with the beat; the median offset from the analysed beats becomes the tap latency.
+     */
+    private fun calibrateTaps() {
+        val t = track ?: return
+        val beats = t.analysis.beatTimes
+        if (beats.size < 16 || !prepared) {
+            toast("This song needs a clear beat to calibrate. Try again once it has loaded.")
+            return
+        }
+        val start = beats[min(beats.size - 16, max(0, beats.indexOfFirst { it >= 20f }))]
+        val taps = ArrayList<Float>()
+        val counter = text("Tap along with the beat 8 times or more.", 14f, Color.WHITE)
+        counter.setPadding(dp(20), dp(12), dp(20), dp(12))
+        val box =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(counter)
+            }
+        val tap = button("TAP", true) {
+            if (player?.isPlaying == true) {
+                taps.add(playerTime())
+                counter.text = "${taps.size} taps"
+            }
+        }
+        tap.textSize = 22f
+        box.addView(tap, LinearLayout.LayoutParams(-1, dp(120)).apply { setMargins(dp(20), 0, dp(20), 0) })
+        AlertDialog.Builder(this)
+            .setTitle("Calibrate taps")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                val latency = TapFix.latency(taps, beats)
+                if (taps.size < 8 || latency == null) toast("Not enough taps on the beat. Try again.")
+                else {
+                    prefs.edit().putFloat("tapLatencyMs", latency * 1000).apply()
+                    toast("Tap latency ${(latency * 1000).roundToInt()} ms")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener {
+                pause()
+                if (page == "Lyrics") showPage("Lyrics")
+            }
+            .show()
+        playFrom(start - 1f)
+    }
+
     private fun exportPage() {
         section("Video format")
         select("Frame shape", "aspect", listOf("9:16", "1:1", "16:9", "4:5"))
@@ -1289,6 +1763,7 @@ class MainActivity : Activity() {
                 aiPhoto = aiPhoto,
                 aiPhotoChip = aiPhotoChip,
                 pack = pack,
+                lyrics = lyricTimings,
             )
         if (!ExportSession.begin(job)) {
             toast("An export is already running.")
@@ -1400,6 +1875,7 @@ class MainActivity : Activity() {
                 prepareAsync()
             }
         if (::seek.isInitialized) seek.progress = 0
+        loadLyrics(t)
         if (::preview.isInitialized) preview.invalidate()
         if (::clock.isInitialized) updateClock()
     }
@@ -1660,6 +2136,11 @@ class MainActivity : Activity() {
             else toast("Storage permission is needed to save the Release Pack to Movies on this Android version.")
             return
         }
+        if (requestCode == 111) {
+            if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) dictate()
+            else toast("Microphone permission is needed to dictate lyrics. Typing or pasting works too.")
+            return
+        }
         if (requestCode == 109 && (pendingExportPicker || pendingPack)) {
             val pack = pendingPack
             pendingExportPicker = false
@@ -1788,7 +2269,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Make every track its own world")
             .setMessage(
-                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size. Export › Storage shows temporary cache and has Clear cache; cache is only removed when you tap that button. Saved looks, photos and finished videos stay."
+                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nLyrics: paste or dictate the words, then Align. Every word is timed to the song on your phone, with no internet, and shows karaoke style above the symbol. Fix flagged words by tapping when you hear them.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size. Export › Storage shows temporary cache and has Clear cache; cache is only removed when you tap that button. Saved looks, photos and finished videos stay."
             )
             .setPositiveButton("Let’s make something", null)
             .show()
@@ -1825,6 +2306,8 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
         audioManager.abandonAudioFocusRequest(focusRequest)
         main.removeCallbacks(tick)
+        recognizer?.destroy()
+        recognizer = null
         player?.release()
         worker.shutdown()
         renderer.background.let { old ->

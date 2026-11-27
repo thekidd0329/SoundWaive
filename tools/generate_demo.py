@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='soundwaive-generated-demo-') as temp:
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(wav), '-map_metadata', '-1', '-ar', '44100', '-c:a', 'aac', '-b:a', '160k', str(audio)], check=True)
     # Analyze the decoded bundled audio so the envelope matches actual playback.
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(audio), '-t', str(SECONDS), '-ar', '11025', '-ac', '1', '-f', 's16le', str(mono)], check=True)
-    subprocess.run(['cargo', 'run', '--locked', '--release', '--manifest-path', str(ROOT / 'engine/Cargo.toml'), '--', str(mono), str(ASSETS / 'generated-demo.analysis')], cwd=ROOT, check=True)
+    subprocess.run(['cargo', 'run', '--locked', '--release', '--no-default-features', '--manifest-path', str(ROOT / 'engine/Cargo.toml'), '--', str(mono), str(ASSETS / 'generated-demo.analysis')], cwd=ROOT, check=True)
 
 (ROOT / 'generated-demo.sha256').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(ROOT).as_posix()}\n' for p in sorted(ASSETS.glob('generated-demo.*')) if p.is_file()))
 (ROOT / 'docs/generated-demo.json').write_text(json.dumps({'origin': 'Synthesized exclusively from mathematical oscillators and seeded noise by tools/generate_demo.py; no user recording, sample pack or external audio is used.', 'duration_seconds': SECONDS, 'tempo_bpm': BPM, 'seed': SEED, 'playback_sample_rate': 44100, 'channels': 2}, indent=2) + '\n')

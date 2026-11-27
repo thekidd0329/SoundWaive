@@ -13,6 +13,24 @@ object NativeEngine {
     }
 
     external fun analyze(input: String, output: String): String
+
+    /** True when this build's engine includes the lyrics aligner (see engine/src/lyrics.rs). */
+    external fun lyricsAvailable(): Boolean
+
+    /**
+     * Aligns [lyrics] to the decoded song in [pcm] (interleaved 16-bit, [rate] Hz, [channels]),
+     * offline, with the models in [modelDir]. Returns JSON: `{"words":[...]}` or
+     * `{"error":"..."}`. Takes seconds; never call it on the main thread.
+     */
+    external fun alignLyrics(
+        pcm: String,
+        rate: Int,
+        channels: Int,
+        lyrics: String,
+        modelDir: String,
+        vadThreshold: Float,
+        stability: Boolean,
+    ): String
 }
 
 data class Note(val time: Float, val midi: Int, val duration: Float, val velocity: Float)
@@ -232,6 +250,7 @@ class Settings(var json: JSONObject = newLook()) {
                 "trimStart" to (0.0..1800.0),
                 "trimEnd" to (0.0..1800.0),
                 "textSize" to (.5..1.8),
+                "lyricsSize" to (.6..1.6),
                 "syncOffset" to (-500.0..500.0),
                 "backgroundDim" to (0.0..1.0),
                 "tempoOverride" to (0.0..240.0),
@@ -273,10 +292,20 @@ class Settings(var json: JSONObject = newLook()) {
                 "renderQuality" to BackgroundMath.QUALITIES,
                 "packYouTube" to PACK_YOUTUBE,
                 "packSquare" to PACK_SQUARE,
+                "lyricsPosition" to LYRICS_POSITIONS,
             )
         for ((k, allowed) in enums) if (json.has(k) && json.optString(k) !in allowed) json.remove(k)
         for (k in
-            listOf("symbolColor", "background", "accent1", "accent2", "accent3", "textColor")) if (
+            listOf(
+                "symbolColor",
+                "background",
+                "accent1",
+                "accent2",
+                "accent3",
+                "textColor",
+                "lyricsColor",
+                "lyricsHighlight",
+            )) if (
             json.has(k)
         )
             try {
@@ -335,6 +364,14 @@ class Settings(var json: JSONObject = newLook()) {
                 "renderQuality",
                 "packYouTube",
                 "packSquare",
+                // Lyrics belong to the song, so presets keep how they are shown.
+                "lyrics",
+                "lyricsCanvas",
+                "lyricsPosition",
+                "lyricsSize",
+                "lyricsColor",
+                "lyricsHighlight",
+                "lyricsVad",
                 // The chosen background media belongs to the user, not to a preset.
                 "backgroundType",
                 "backgroundUri",
@@ -699,12 +736,22 @@ class Settings(var json: JSONObject = newLook()) {
                 "packSquare" to "30 s",
                 // Set only on the Release Pack's per-clip copies (see ReleasePack).
                 "fitSymbolToFrame" to false,
+                // 1.17 lyrics: shown whenever the song has word timings; off on the Spotify
+                // Canvas unless switched on there.
+                "lyrics" to true,
+                "lyricsCanvas" to false,
+                "lyricsPosition" to "Auto",
+                "lyricsSize" to 1.0,
+                "lyricsColor" to "#F5F5F5",
+                "lyricsHighlight" to "#DDF75D",
+                "lyricsVad" to false,
             )
 
         const val PACK_4K = "2160p (4K)"
         const val PACK_1080 = "1080p"
         val PACK_YOUTUBE = listOf(PACK_4K, PACK_1080)
         val PACK_SQUARE = listOf("15 s", "30 s", "60 s")
+        val LYRICS_POSITIONS = listOf("Auto", "Top", "Center", "Bottom")
     }
 }
 

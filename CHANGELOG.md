@@ -14,6 +14,34 @@
 
 Not built or run locally. Awaiting CI and Christian's on-device test.
 
+## [1.17.1] - 2026-11-27
+
+### Fixed
+- Align lyrics failed on device with "Couldn't finish: lyrics/cmudict-nostress.txt.gz". Android's asset packager strips a trailing `.gz` from filenames, so the pronunciation dictionary never made it into the APK under that name. The dictionary is now bundled as `cmudict-nostress.dict` and copied to `cmudict-nostress.txt.gz` in the model folder, which is the name the engine already reads. Installing this update recopies the models. ONNX models and the dictionary are also packaged uncompressed, the same way `.tflite` already is.
+
+## [1.17.0] - 2026-11-26
+
+### Added
+- **Word-timed lyrics** (new **Lyrics** tab). Paste the lyrics, or dictate them a line at a time, then tap **Align lyrics**. Every word gets a start time from the song itself, fully offline: the app has no internet permission and the aligner runs in the Rust engine.
+  - Aligner: `engine/lyrics-aligner`, an in-repo Rust port of schufo/lyrics-aligner (MIT): 16 kHz STFT, CMU-dictionary phonemes, the upstream network up to its attention scores run with tract ONNX, and a monotonic DTW. Word timings match the Python original to 0.0 ms. It is linked into `crownpulse_engine` behind the default `lyrics` cargo feature; `engine/src/lyrics.rs` adds the JNI entries `NativeEngine.alignLyrics` (decoded PCM path + text in, JSON word timings with confidence out) and `NativeEngine.lyricsAvailable`.
+  - The models (`scores.onnx` 15.9 MiB, `voice.onnx` 22.6 MiB) and the CMU dictionary (0.8 MiB) are app assets in `assets/lyrics/`, copied once to no-backup storage and loaded by path. None of them is compiled into the native library.
+  - Alignment runs off the main thread with a progress bar. It re-runs on an 8 ms shifted copy to flag ambiguous words (upstream's stability check). **Skip instrumental parts** turns on upstream's voice-activity pass (`voice.onnx`, threshold 5); it is slower.
+  - Lyrics and word timings are saved per song as JSON in app storage (`files/lyrics/<hash of the song URI>.json`), with a draft for lyrics typed but not aligned yet.
+  - Dictation fills in the lyrics text only (never the song). It uses Android's on-device recognizer on Android 13+ when the phone has one, otherwise the system recognizer with `EXTRA_PREFER_OFFLINE`. The microphone permission is requested only when Dictate is tapped.
+- **Tap-to-fix** for flagged words (low confidence, odd length or a guessed pronunciation). For each one the song plays from 2.5 s before it, and you tap when you hear the word. The tap is moved back by your tap latency, snapped to the nearest onset (spectral flux within ±120 ms), and kept between its neighbours so words never change order. **Calibrate taps** measures the latency by tapping along with the beat (median offset from the analysed beats).
+- **Karaoke lyrics on the video**, in the preview and every export: the current line, sung words in full color, the word being sung in the highlight color, words to come dimmer, and the next line small below. Lines wrap to two rows and shrink to fit. Placement follows the frame shape (9:16 sits above the Reels/TikTok buttons, 16:9 and 1:1 lower) and moves up when titles are at the bottom. Settings: show lyrics, position (Auto, Top, Center, Bottom), text size, word color and highlight color.
+- **Release Pack**: the YouTube video, the three verticals, the reel and the square all carry lyrics framed for their shape. The 8 s Spotify Canvas has them **off by default** (Spotify shows its own lyrics); "Lyrics on the Spotify Canvas loop" turns them on. `ReleasePlan.Item.lyricsByDefault` holds that rule.
+
+### Changed
+- **Layer order: lyrics are drawn above the crown.** A frame is now background < effects < symbol (crown or logo) < lyrics, identically in the preview, the CPU export path and the GPU post pass. The order is one documented hook, `LayerOrder.lyrics` (`LyricsZ.TOP`: above titles and full-frame effects, under the clip fade; `LyricsZ.ABOVE_SYMBOL`: right above the scene, under darkening, flash, grain, vignette and titles). The crown's position, size and animation are unchanged. Lyrics are never mirrored or shaken.
+- The GPU post pass composites the lyrics from a strip texture drawn at the output's full width with the same code as the Canvas path, re-uploaded only when the line or the sung word changes.
+- `buildNativeEngine` points the cc crate at the NDK clang and `llvm-ar` (tract compiles assembly kernels), and builds each ABI in `lyricsAbis` with the `lyrics` feature. All four ABIs (arm64-v8a, armeabi-v7a, x86, x86_64) are in it; an ABI removed from it builds with `--no-default-features` and the app hides the Lyrics tab there.
+- `tools/generate_demo.py` builds the analysis CLI without the lyrics feature (the demo analysis is unchanged).
+
+### Notes
+- Size: the models and dictionary add about 38 MB to the APK (they compress little). The engine library grows from 0.4 MB to 16 MB on arm64 (9.6 MB armv7, 19.7 MB x86, 21.7 MB x86_64; about 5-7 MB each compressed), so a Play download for one phone grows by about 44 MB and the universal APK with all four ABIs by about 62 MB. First use copies the models to app storage (about 40 MB).
+- A song is refused for alignment above 48 million frames x phoneme tokens (roughly a 10-minute song with long lyrics), with a message, rather than running out of memory.
+- Alignment accuracy depends on the mix. On the reference song about a quarter of the words come out flagged, mostly around instrumental gaps; that is what tap-to-fix and the voice-activity option are for.
 
 ## [1.15.0] - 2026-11-26
 

@@ -1,3 +1,7 @@
 8fb1c48e943d083d612ecf11c04173a2ed3cec2d4170f16eb7db0789d2ca9785  app/src/main/assets/crown.png
 11de894a972438df6db0300d640af191847cf45c74625c11d6f085265655f94e  app/src/main/assets/paper.png
 47dbfe34c3492e6f7f7fb2b0ed99794e8e41215c2177821f03e0f5304e4b9846  app/src/main/assets/models/real_esrgan_general_x4v3.tflite
+c281e263875ea8f854f1e28245ded24d896a42a1ce56b08412ea43b9bcf403e9  app/src/main/assets/lyrics/scores.onnx
+f3f24482b7a8e279e5f04c34acd22b69ce74de33d26ca9e8d1ba81b158330439  app/src/main/assets/lyrics/voice.onnx
+5ad6f08f9dbca65879eafd3f6a75087f80f980577451eea00efb483b85afa443  app/src/main/assets/lyrics/cmudict-nostress.dict
+87b9524790f961be6b6349511ac301d511e5a36f6914d5cf005a87a2f04a413d  app/src/main/assets/lyrics/NOTICE.txt

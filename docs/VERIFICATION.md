@@ -45,6 +45,8 @@ These builds are awaiting Christian's device test.
 | 1.15.0 | 2026-11-26 | Awaiting Christian's device test | Release Pack: one tap renders YouTube 16:9 (4K or 1080p), three distinct 15 s verticals, a 30 s reel, a square promo and a silent 8 s looping Spotify Canvas to Movies/SoundWaive/<song>/. Not built or run locally; awaiting CI and Christian's on-device test. |
 | 1.16.0 | 2026-11-22 | Awaiting Christian's device test | Android 8+ support across four ARM and Intel ABIs. |
 | 1.17.5 | 2026-11-27 | Awaiting Christian's device test | Manual Export › Clear cache only, on an allowlist of temp dirs; never deletes finished MP4s. Automatic launch/export sweeps removed after they deleted videos. Not built or run locally. |
+| 1.17.1 | 2026-11-27 | Awaiting Christian's device test | Fixes Align lyrics failing because Android's asset packager stripped the `.gz` suffix from the pronunciation dictionary. The dictionary is bundled as `cmudict-nostress.dict` and copied to the `cmudict-nostress.txt.gz` name the engine already reads. Not built with Gradle or run locally; awaiting Christian's device test. |
+| 1.17.0 | 2026-11-26 | Awaiting Christian's device test | Word-timed karaoke lyrics: offline Rust aligner (tract ONNX), tap-to-fix, lyrics layer above the crown in preview, CPU and GPU export and every Release Pack shape (off on the Canvas by default). Not built with Gradle or run locally; awaiting CI and Christian's on-device test. |
 
 GitHub Actions history for a given commit is at the [Android workflow runs](https://github.com/thekidd0329/SoundWaive/actions/workflows/android.yml).
 
@@ -53,6 +55,22 @@ GitHub Actions history for a given commit is at the [Android workflow runs](http
 Before the Release Pack integration, the compatibility branch's local build passed 24 Rust tests, 53 JVM tests and Android lint with zero errors. The debug APK, release APK and release AAB contain the Rust analysis engine and the appropriate offline sharpening libraries for all four ABIs. An API 26 x86 emulator imported the demo, exported an H.264/AAC MP4 after leaving the activity and checked the AAC timing against a reference pulse.
 
 The Android workflow runs the background export, AAC priming and photo sharpening tests on AOSP images for APIs 26, 34 and 35. Each device job publishes its instrumentation results. The rebased build also checks saving a completed MP4 through the Release Pack storage path and rendering a silent loop through the adaptive AVC encoder. These new combined checks, the AVC/AAC fallback changes and the rebased build are awaiting CI; earlier results are historical.
+
+## 1.17.0 lyrics checks
+
+Done on the development box before the pull request, without Gradle or a device:
+
+- `cargo test` on the host engine (27 tests, including the lyric-word mapping and PCM mixdown tests) and `cargo fmt --check` pass.
+- Release `cargo build --lib` of the engine with the `lyrics` feature for all four Android targets (aarch64, armv7, i686, x86_64) with NDK r27c at API 26; the JNI symbols `alignLyrics`, `lyricsAvailable` and `analyze` are exported. CI builds with the pinned NDK 28.2.13676358.
+- On a private reference song (not committed), the vendored aligner called through the engine's lyrics entry gives word onsets identical (0.0 ms) to the standalone port's CLI: 460 words, 4.2 s on the box's CPU with the stability check.
+
+Still to check on the phone, by Christian: the Lyrics tab, alignment time and memory on the Pixel, dictation, tap-to-fix and calibration, and the lyrics layer above the crown in the preview, a normal export (GPU path) and a Release Pack.
+
+## 1.17.1 lyrics dictionary packaging — November 27, 2026
+
+- Align lyrics on the 1.17.0 Pixel build failed with "Couldn't finish: lyrics/cmudict-nostress.txt.gz". Android's AAPT/AGP asset packager strips a trailing `.gz` from asset filenames, so `context.assets.open("lyrics/cmudict-nostress.txt.gz")` threw FileNotFoundException before the models were copied and before the aligner ran. The dictionary is now stored as `app/src/main/assets/lyrics/cmudict-nostress.dict` and copied to `cmudict-nostress.txt.gz` in the no-backup model folder. The copy still runs when the app's last-update stamp changes, so installing this update replaces the 1.17.0 partial copy.
+- Nothing was compiled, tested, rendered or run on a phone for this change.
+- Awaiting Christian's device test.
 
 ## Original 1.0 emulator checks
 
