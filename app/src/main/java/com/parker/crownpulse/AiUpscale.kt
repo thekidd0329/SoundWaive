@@ -276,11 +276,10 @@ private constructor(
 /**
  * Export wrapper for a video background with the AI effect: each decoded frame (one copy,
  * the existing GPU read-back) is upscaled and cleaned, and the result is cached as a JPEG
- * per frame time under [cacheDir] for the rest of this export job (so a later Release Pack
- * clip of the same size can reuse it). The folder is deleted when the job finishes, fails
- * or is canceled, so the frames do not stay on the phone. Frames already as sharp as
- * [targetShort] pass through unchanged. After any model error the rest of the export uses
- * the plain frames.
+ * per frame time under [cacheDir], so a later export or Release Pack clip of the same size
+ * can reuse it. The folder stays until the user taps Export › Clear cache. Frames already
+ * as sharp as [targetShort] pass through unchanged. After any model error the rest of the
+ * export uses the plain frames.
  */
 class AiVideoBackground(
     private val video: VideoBackground,
@@ -336,8 +335,8 @@ class AiVideoBackground(
 
     companion object {
         /**
-         * Cache folder for this clip at this size. Only the newest clip's folder is kept
-         * during a job. [AppCache] removes the folder when the job ends.
+         * Cache folder for this clip at this size. Only the newest clip's folder is kept.
+         * Export › Clear cache removes it; it is not deleted automatically after an export.
          */
         fun cacheFor(root: File, uri: String, targetShort: Int, size: BackgroundMath.Size): File {
             val base = File(root, "ai-video")

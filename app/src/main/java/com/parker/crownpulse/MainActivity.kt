@@ -109,9 +109,6 @@ class MainActivity : Activity() {
         restorePack()
         restoreImages()
         val exportJob = ExportSession.job
-        // Leave cache alone while an export is still writing it. Otherwise drop leftover
-        // AI frame JPEGs, export scratch, timing probes and stale imports.
-        if (exportJob == null) AppCache.clean(cacheDir)
         buildUi()
         refreshBackground()
         if (exportJob != null) restoreTrack(exportJob.track) else loadDemo()
@@ -1175,13 +1172,15 @@ class MainActivity : Activity() {
                 )
             }
         )
-        val cacheBytes = AppCache.size(cacheDir)
+        val keep = track?.pcm?.parentFile
+        val cacheBytes = AppCache.size(cacheDir, keep)
         section(
             "Storage",
             "Temporary files (imported audio, export scratch and AI video frames) are using " +
-                "${AppCache.format(cacheBytes)}. Clearing cache does not remove saved looks, " +
-                "artwork, backgrounds or the demo. The song you have open is kept so you don’t " +
-                "have to import it again.",
+                "${AppCache.format(cacheBytes)}. Cache is cleared only when you tap Clear cache; " +
+                "it does not run when you open the app or when an export ends. It does not " +
+                "remove saved looks, artwork, backgrounds, the demo or finished videos. The " +
+                "song you have open is kept so you don’t have to import it again.",
         )
         val clear =
             button("Clear cache") {
@@ -1193,9 +1192,9 @@ class MainActivity : Activity() {
                 val keep = track?.pcm?.parentFile
                 startBusy("Clearing cache")
                 worker.submit {
-                    val before = AppCache.size(cacheDir)
+                    val before = AppCache.size(cacheDir, keep)
                     AppCache.clean(cacheDir, keep)
-                    val freed = (before - AppCache.size(cacheDir)).coerceAtLeast(0L)
+                    val freed = (before - AppCache.size(cacheDir, keep)).coerceAtLeast(0L)
                     runOnUiThread {
                         if (closing) return@runOnUiThread
                         endBusy()
@@ -1789,7 +1788,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Make every track its own world")
             .setMessage(
-                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size. Export › Storage shows temporary cache and lets you clear it; saved looks and photos stay."
+                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nExport › Release Pack makes seven videos in one go (YouTube 16:9, three 15 s vertical promos, a 30 s reel, a square promo and a silent 8 s Spotify Canvas loop) and saves them to Movies/SoundWaive.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size. Export › Storage shows temporary cache and has Clear cache; cache is only removed when you tap that button. Saved looks, photos and finished videos stay."
             )
             .setPositiveButton("Let’s make something", null)
             .show()

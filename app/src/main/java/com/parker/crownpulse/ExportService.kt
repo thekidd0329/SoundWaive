@@ -70,7 +70,6 @@ class ExportService : Service() {
         val job = ExportSession.job
         if (job == null) {
             ExportSession.fail("The export could not start.")
-            AppCache.clean(cacheDir)
             stopAndRelease()
             return
         }
@@ -84,23 +83,14 @@ class ExportService : Service() {
             if (job.pack) runPack(job) else runSingle(job)
         } finally {
             ExportSession.stopListening(onStatus)
-            // Drop the AI frame cache and leftover scratch now that the job has ended.
-            // The current track's decoded audio is kept so the session can keep playing.
-            AppCache.clean(cacheDir, job.track.pcm?.parentFile)
             stopAndRelease()
         }
-    }
-
-    /** Clears export cache after work has stopped, before the finished/failed status is shown. */
-    private fun releaseExportCache(job: ExportJob) {
-        AppCache.clean(cacheDir, job.track.pcm?.parentFile)
     }
 
     /** One video to the file the user picked. */
     private fun runSingle(job: ExportJob) {
         val output = job.output
         if (output == null) {
-            releaseExportCache(job)
             ExportSession.fail("The export could not start.")
             return
         }
@@ -116,7 +106,6 @@ class ExportService : Service() {
                 result.file.inputStream().use { it.copyTo(out) }
             }
             result.file.delete()
-            releaseExportCache(job)
             ExportSession.finish(
                 output,
                 result.width,
@@ -130,7 +119,6 @@ class ExportService : Service() {
             try {
                 android.provider.DocumentsContract.deleteDocument(contentResolver, output)
             } catch (_: Exception) {}
-            releaseExportCache(job)
             ExportSession.canceled()
             if (ExportSession.status is ExportStatus.Failed) {
                 notifyDone("Export stopped", ExportSession.TIMEOUT_MESSAGE)
@@ -141,7 +129,6 @@ class ExportService : Service() {
                 android.provider.DocumentsContract.deleteDocument(contentResolver, output)
             } catch (_: Exception) {}
             val message = e.message ?: "Please try again."
-            releaseExportCache(job)
             ExportSession.fail(message)
             notifyDone("Couldn’t finish the export", message)
         }
@@ -229,7 +216,6 @@ class ExportService : Service() {
                 }
                 done += costs[i]
             }
-            releaseExportCache(job)
             ExportSession.finishPack(folder, results, problems, notes.toList(), false)
             notifyDone(
                 if (problems.isEmpty()) "Your Release Pack is ready"
@@ -238,7 +224,6 @@ class ExportService : Service() {
             )
         } catch (e: InterruptedException) {
             if (ExportSession.timedOut) problems += ExportSession.TIMEOUT_MESSAGE
-            releaseExportCache(job)
             ExportSession.finishPack(folder, results, problems, notes.toList(), true)
             notifyDone(
                 "Release Pack stopped",
@@ -248,12 +233,10 @@ class ExportService : Service() {
             Log.e(TAG, "Release Pack failed", e)
             if (results.isEmpty()) {
                 val message = e.message ?: "Please try again."
-                releaseExportCache(job)
                 ExportSession.fail(message)
                 notifyDone("Couldn’t make the Release Pack", message)
             } else {
                 problems += e.message ?: "The Release Pack stopped early."
-                releaseExportCache(job)
                 ExportSession.finishPack(folder, results, problems, notes.toList(), true)
                 notifyDone("Release Pack stopped", "${results.size} finished videos kept")
             }

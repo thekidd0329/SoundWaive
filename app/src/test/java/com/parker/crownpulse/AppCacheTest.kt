@@ -16,12 +16,17 @@ class AppCacheTest {
         }
 
     @Test
-    fun sizeAddsNestedFilesAndIgnoresMissing() {
+    fun sizeCountsOnlyAllowlistedTemps() {
         val root = tmp.newFolder("cache")
         file(File(root, "ai-video/clip"), "1.jpg", 100)
         file(File(root, "ai-video/clip"), "2.jpg", 50)
         file(File(root, "track-1"), "audio.pcm", 20)
-        assertEquals(170L, AppCache.size(root))
+        file(File(root, "exports"), "audio-1.m4a", 8)
+        file(File(root, "exports"), "CrownPulse-1.mp4", 80)
+        file(root, "other.mp4", 40)
+        file(File(root, "unknown"), "note.txt", 7)
+        assertEquals(178L, AppCache.size(root))
+        assertEquals(158L, AppCache.size(root, File(root, "track-1")))
         assertEquals(0L, AppCache.size(File(root, "missing")))
     }
 
@@ -36,17 +41,17 @@ class AppCacheTest {
     }
 
     @Test
-    fun cleanRemovesLeftoversButKeepsTheCurrentTrack() {
+    fun cleanRemovesAllowlistedTempsButKeepsTheCurrentTrack() {
         val cache = tmp.newFolder("cache")
         val files = tmp.newFolder("files")
         file(files, "artwork.png", 40)
         file(File(files, "demo"), "generated-demo-v1.m4a", 30)
         file(File(cache, "ai-video/clip"), "frame.jpg", 200)
         file(File(cache, "aac-timing-old"), "probe.pcm", 10)
-        file(File(cache, "exports"), "CrownPulse-1.mp4", 80)
+        file(File(cache, "exports"), "audio-1.m4a", 8)
+        file(File(cache, "exports/aac-timing-probe"), "probe.m4a", 4)
         file(File(cache, "track-old"), "audio.pcm", 15)
         val current = File(cache, "track-current").also { file(it, "audio.pcm", 25) }
-        File(cache, "stray.tmp").writeBytes(ByteArray(5))
 
         AppCache.clean(cache, current)
 
@@ -54,13 +59,36 @@ class AppCacheTest {
         assertEquals(25L, File(current, "audio.pcm").length())
         assertFalse(File(cache, "ai-video").exists())
         assertFalse(File(cache, "aac-timing-old").exists())
-        assertFalse(File(cache, "exports").exists())
+        assertFalse(File(cache, "exports/audio-1.m4a").exists())
+        assertFalse(File(cache, "exports/aac-timing-probe").exists())
         assertFalse(File(cache, "track-old").exists())
-        assertFalse(File(cache, "stray.tmp").exists())
-        // filesDir is a sibling, not a child of cache, and must be left alone.
         assertTrue(File(files, "artwork.png").isFile)
         assertTrue(File(files, "demo/generated-demo-v1.m4a").isFile)
-        assertEquals(25L, AppCache.size(cache))
+        assertEquals(0L, AppCache.size(cache, current))
+    }
+
+    @Test
+    fun cleanNeverDeletesFinishedMp4sOrUnlistedFiles() {
+        val cache = tmp.newFolder("cache")
+        val current = File(cache, "track-current").also { file(it, "audio.pcm", 25) }
+        val exportMp4 = file(File(cache, "exports"), "CrownPulse-1.mp4", 80)
+        val rootMp4 = file(cache, "saved.mp4", 40)
+        val stray = file(cache, "stray.tmp", 5)
+        val unknown = file(File(cache, "unknown"), "clip.mp4", 30)
+        file(File(cache, "exports"), "audio-1.m4a", 8)
+        file(File(cache, "ai-video/clip"), "frame.jpg", 200)
+
+        AppCache.clean(cache, current)
+
+        assertTrue(exportMp4.isFile)
+        assertEquals(80L, exportMp4.length())
+        assertTrue(rootMp4.isFile)
+        assertTrue(stray.isFile)
+        assertTrue(unknown.isFile)
+        assertTrue(File(current, "audio.pcm").isFile)
+        assertFalse(File(cache, "exports/audio-1.m4a").exists())
+        assertFalse(File(cache, "ai-video").exists())
+        assertTrue(File(cache, "exports").isDirectory)
     }
 
     @Test
@@ -85,11 +113,14 @@ class AppCacheTest {
     }
 
     @Test
-    fun cleanWithNoKeepEmptiesTheCache() {
+    fun cleanWithNoKeepRemovesStaleTracksButNotMp4s() {
         val cache = tmp.newFolder("cache")
         file(File(cache, "track-1"), "audio.pcm", 25)
         file(File(cache, "ai-video/clip"), "frame.jpg", 200)
+        file(File(cache, "exports"), "CrownPulse-1.mp4", 80)
         AppCache.clean(cache)
-        assertEquals(0, cache.listFiles()?.size ?: 0)
+        assertFalse(File(cache, "track-1").exists())
+        assertFalse(File(cache, "ai-video").exists())
+        assertTrue(File(cache, "exports/CrownPulse-1.mp4").isFile)
     }
 }
