@@ -102,10 +102,19 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           sudo chown "$(id -un)" /dev/kvm
           sdkmanager "emulator" "platform-tools" "$IMAGE"
+          emulator -accel-check
           echo no | avdmanager create avd --name soundwaive --package "$IMAGE" --device "Nexus 5X"
-          emulator @soundwaive -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
-          trap 'adb logcat -d > logcat.txt 2>&1 || true; adb emu kill >/dev/null 2>&1 || true' EXIT
-          timeout 360 bash -c 'until adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r" | grep -qx 1; do sleep 2; done'
+          emulator @soundwaive -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on -partition-size 1024 > emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'timeout 10 adb logcat -d > logcat.txt 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
+          deadline=$((SECONDS + 360))
+          until timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r" | grep -qx 1; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null || (( SECONDS >= deadline )); then
+              cat emulator.log
+              exit 1
+            fi
+            sleep 2
+          done
           adb shell input keyevent 82
           adb install -r -g -t apks/debug/app-debug.apk
           adb install -r -t apks/androidTest/debug/app-debug-androidTest.apk
