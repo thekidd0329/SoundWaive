@@ -24,6 +24,10 @@ class AndroidCompatibilityTest {
             eraseColor(0xff3366aa.toInt())
             setHasAlpha(false)
         }
+        if (!AiUpscaler.supportsModel()) {
+            assertNull(AiUpscaler.get(context))
+            return
+        }
         val ai = checkNotNull(AiUpscaler.get(context))
         if (!Process.is64Bit() && Build.SUPPORTED_32_BIT_ABIS.firstOrNull() == "x86") {
             assertEquals("CPU", ai.chip)
@@ -32,6 +36,16 @@ class AndroidCompatibilityTest {
         assertEquals(16, result.width)
         assertEquals(16, result.height)
         assertTrue(android.graphics.Color.blue(result.getPixel(8, 8)) > 80)
+    }
+
+    @Test fun measuredAacPrimingMatchesThePlatformEncoder() {
+        val track = AudioEngine(context).demo()
+        val cancel = AtomicBoolean(false)
+        var encoderDelay = -1
+        val measured = AacTimingProbe.measure(context, track, context.cacheDir, cancel) { probe, duration, file ->
+            encoderDelay = VideoExporter(context).encodeAudio(probe, 0f, duration, file, cancel) {}
+        }
+        assertTrue("Expected $encoderDelay samples, measured $measured", kotlin.math.abs(measured - encoderDelay) <= 2)
     }
 
     @Test fun importedAudioExportsAfterLeavingTheActivity() {
@@ -60,7 +74,7 @@ class AndroidCompatibilityTest {
                 set("resolution", "720p")
                 set("fps", "24")
                 set("trimEnd", .5f)
-                set("renderQuality", "Fast")
+                set("renderQuality", BackgroundMath.FAST)
             }
             ExportSession.consume()
             assertTrue(ExportSession.begin(ExportJob(Uri.fromFile(output), imported, settings, null, null, null, null, null)))

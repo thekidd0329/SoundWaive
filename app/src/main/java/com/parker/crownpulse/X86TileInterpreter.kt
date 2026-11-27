@@ -11,6 +11,7 @@ internal object X86TileInterpreter {
         false
     }
 
+    external fun supportsModel(): Boolean
     external fun open(assets: AssetManager, path: String, threads: Int): Long
     external fun run(handle: Long, input: FloatArray, output: FloatArray): Boolean
     external fun close(handle: Long)

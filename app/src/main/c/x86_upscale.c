@@ -1,6 +1,7 @@
 // LiteRT's stable C interpreter API supplies the CPU path on 32-bit Intel.
 #include <android/asset_manager_jni.h>
 #include <jni.h>
+#include <cpuid.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include "tflite/c/c_api.h"
@@ -15,6 +16,15 @@ static void release_model(TileModel *m) {
     if (m->interpreter) TfLiteInterpreterDelete(m->interpreter);
     if (m->asset) AAsset_close(m->asset);
     free(m);
+}
+
+// The published x86 interpreter executes SSE4.1 instructions during model creation.
+JNIEXPORT jboolean JNICALL
+Java_com_parker_crownpulse_X86TileInterpreter_supportsModel(JNIEnv *env, jobject self) {
+    (void)env;
+    (void)self;
+    unsigned int eax, ebx, ecx, edx;
+    return __get_cpuid(1, &eax, &ebx, &ecx, &edx) && (ecx & bit_SSE4_1) != 0;
 }
 
 JNIEXPORT jlong JNICALL

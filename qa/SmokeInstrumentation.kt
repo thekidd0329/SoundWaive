@@ -169,7 +169,7 @@ class SmokeInstrumentation : Instrumentation() {
             s.set("fps", "30")
             var pr = 0f
             val exp =
-                VideoExporter().export(imported, s, renderer, out, cancel) { label, v ->
+                VideoExporter(ctx).export(imported, s, renderer, out, cancel) { label, v ->
                     if (v - pr > .08f) {
                         status("$label ${(v*100).toInt()}%")
                         pr = v
@@ -187,7 +187,7 @@ class SmokeInstrumentation : Instrumentation() {
             variation.set("trimStart", 90)
             variation.set("trimEnd", 91)
             val second =
-                VideoExporter().export(imported, variation, renderer, out, cancel) { _, _ -> }
+                VideoExporter(ctx).export(imported, variation, renderer, out, cancel) { _, _ -> }
             second.file.renameTo(File(out, "independent-landscape.mp4"))
             check(second.width == 1280 && second.height == 720 && second.frames == 24)
             File(out, "analysis-report.txt")

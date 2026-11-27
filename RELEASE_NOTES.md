@@ -1,5 +1,9 @@
 # SoundWaive release notes
 
+## 1.15.0 — Android device compatibility
+
+SoundWaive now installs on Android 8.0 and newer across 32-bit and 64-bit ARM and Intel devices. Background sharpening uses the available GPU or CPU, with optional Tensor G5 acceleration. Exports continue when you leave the app. When the phone needs a lower video setting, the completed export shows what it used.
+
 ## 1.15.0 — Release Pack
 
 **What's new**

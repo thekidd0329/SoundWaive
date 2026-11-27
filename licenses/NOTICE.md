@@ -2,6 +2,8 @@
 
 Kotlin standard library: Apache License 2.0, JetBrains. Gradle wrapper: Apache License 2.0, Gradle. Android runtime components are supplied by the device.
 
+The 32-bit Intel build includes the LiteRT 1.4.2 CPU interpreter from Google. Its distribution license is included in [LiteRT-1.4.2-LICENSE](LiteRT-1.4.2-LICENSE).
+
 Rust dependency lockfile includes the following packages. Platform-specific or build-only entries may not be present in the Android binary. License texts are included in this directory.
 
 - bytes 1.12.1: MIT
