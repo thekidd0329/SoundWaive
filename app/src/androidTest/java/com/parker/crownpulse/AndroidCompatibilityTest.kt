@@ -96,6 +96,14 @@ class AndroidCompatibilityTest {
             } finally {
                 extractor.release()
             }
+            // Exercise the same public Movies saving path used by Release Pack on every API.
+            val saved = ReleasePack.save(context, output, "SoundWaiveCompatibilityTest", "compat-output.mp4")
+            try {
+                val actual = context.contentResolver.openInputStream(saved)!!.use { it.readBytes() }
+                assertArrayEquals(output.readBytes(), actual)
+            } finally {
+                context.contentResolver.delete(saved, null, null)
+            }
         } finally {
             ExportSession.stopListening(listener)
             if (ExportSession.isRunning()) ExportSession.cancel.set(true)

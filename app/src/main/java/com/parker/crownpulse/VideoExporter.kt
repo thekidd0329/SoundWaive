@@ -648,43 +648,6 @@ class VideoExporter(private val context: Context) {
         }
     }
 
-    /** A configured encoder; retries once without the profile if it refuses High. */
-    private fun openEncoder(name: String, format: MediaFormat, withProfile: Boolean): MediaCodec {
-        val first = MediaCodec.createByCodecName(name)
-        try {
-            first.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            return first
-        } catch (e: Exception) {
-            first.release()
-            if (!withProfile) throw e
-            Log.w(TAG, "Encoder refused H.264 High; using its default profile", e)
-        }
-        format.removeKey(MediaFormat.KEY_PROFILE)
-        format.removeKey(MediaFormat.KEY_LEVEL)
-        val second = MediaCodec.createByCodecName(name)
-        try {
-            second.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            return second
-        } catch (e: Exception) {
-            second.release()
-            throw e
-        }
-    }
-
-    /** Highest H.264 High level the encoder [name] lists, or null if it has no High profile. */
-    private fun highProfileLevel(codecs: MediaCodecList, name: String): Int? =
-        try {
-            codecs.codecInfos
-                .firstOrNull { it.name == name }
-                ?.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                ?.profileLevels
-                ?.filter { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
-                ?.maxOfOrNull { it.level }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not read the encoder's H.264 profiles", e)
-            null
-        }
-
     private class EncoderSurface(
         val surface: Surface,
         val w: Int,

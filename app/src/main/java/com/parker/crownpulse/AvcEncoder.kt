@@ -24,7 +24,7 @@ internal class AvcEncoder(
                     else info.name to caps
                 }
             val short = minOf(width, height)
-            val sizes = listOf(short, 720, 360).distinct().filter { it <= short }
+            val sizes = listOf(short, 1080, 720, 360).distinct().filter { it <= short }
             val rates = listOf(fps, 30, 24).distinct().filter { it <= fps }
             for (size in sizes) {
                 val w = width * size / short / 2 * 2
@@ -40,25 +40,34 @@ internal class AvcEncoder(
                                 if (!video.areSizeAndRateSupported(encodedW, encodedH, rate.toDouble())) null
                                 else video.bitrateRange.clamp(bitrate)
                             }.getOrNull() ?: continue
-                            val format = MediaFormat.createVideoFormat(mime, encodedW, encodedH).apply {
-                                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                                setInteger(MediaFormat.KEY_BIT_RATE, bits)
-                                setInteger(MediaFormat.KEY_FRAME_RATE, rate)
-                                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-                                setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-                                setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
-                                setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-                            }
-                            // Some OEM codecs support AVC surfaces but reject optional color keys.
-                            // Keep explicit BT.709 where possible, then retry with mandatory keys only.
-                            val device = start(name, format) ?: start(name,
+                            // Preserve Release Pack's High-profile preference while retaining
+                            // compatibility retries for codecs that refuse profile or color keys.
+                            val high = runCatching {
+                                caps.profileLevels.filter {
+                                    it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+                                }.maxOfOrNull { it.level }
+                            }.getOrNull()
+                            fun format(color: Boolean, profile: Boolean) =
                                 MediaFormat.createVideoFormat(mime, encodedW, encodedH).apply {
                                     setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                                     setInteger(MediaFormat.KEY_BIT_RATE, bits)
                                     setInteger(MediaFormat.KEY_FRAME_RATE, rate)
                                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+                                    if (color) {
+                                        setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+                                        setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+                                        setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+                                    }
+                                    if (profile && high != null) {
+                                        setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+                                        setInteger(MediaFormat.KEY_LEVEL, high)
+                                    }
                                 }
-                            ) ?: continue
+                            val device = (if (high != null) start(name, format(true, true)) else null)
+                                ?: start(name, format(true, false))
+                                ?: (if (high != null) start(name, format(false, true)) else null)
+                                ?: start(name, format(false, false))
+                                ?: continue
                             val notice = if (size != short || rate != fps || bits != bitrate) {
                                 "This device exported at ${w}×${h}, $rate fps and ${bits / 1000} kbps."
                             } else null
