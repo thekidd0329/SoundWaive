@@ -3,6 +3,11 @@ package com.parker.crownpulse
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.media.MediaScannerConnection
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
@@ -154,6 +159,7 @@ object ReleasePack {
      * same name is replaced, so re-rendering a pack does not pile up "(1)" files.
      */
     fun save(context: Context, file: File, song: String, name: String): Uri {
+        if (Build.VERSION.SDK_INT < 29) return saveLegacy(context, file, song, name)
         val resolver = context.contentResolver
         val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val folder = "${Environment.DIRECTORY_MOVIES}/SoundWaive/$song/"
@@ -193,4 +199,34 @@ object ReleasePack {
         }
         return uri
     }
+    /** Android 8/9: copy to public Movies, then index it to obtain a shareable content URI. */
+    @Suppress("DEPRECATION")
+    private fun saveLegacy(context: Context, file: File, song: String, name: String): Uri {
+        if (context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED)
+            throw IOException("Storage permission is required to save a Release Pack to Movies.")
+        val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val folder = File(movies, "SoundWaive/$song")
+        if (!folder.isDirectory && !folder.mkdirs())
+            throw IOException("Couldn’t create the Release Pack folder.")
+        val target = File(folder, name)
+        val temp = File.createTempFile(".soundwaive-", ".tmp", folder)
+        try {
+            file.inputStream().use { input -> temp.outputStream().use { input.copyTo(it) } }
+            // Rename only after the copy succeeds; never expose an incomplete MP4.
+            if (!temp.renameTo(target)) throw IOException("Couldn’t save $name to Movies.")
+        } finally {
+            temp.delete()
+        }
+        val scanned = AtomicReference<Uri?>()
+        val ready = CountDownLatch(1)
+        MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf("video/mp4")) { _, uri ->
+            scanned.set(uri)
+            ready.countDown()
+        }
+        if (!ready.await(30, TimeUnit.SECONDS))
+            throw IOException("$name was saved, but Android did not index it in time.")
+        return scanned.get() ?: throw IOException("$name was saved, but Android could not index it.")
+    }
+
 }
