@@ -1,6 +1,6 @@
 # SoundWaive
 
-A lightweight, offline Android app for making sound-reactive music videos. Built with Kotlin and Rust; Android 8 or newer. Originally delivered as CrownPulse, now developed here as SoundWaive.
+A lightweight, offline Android app for making sound-reactive music videos. Built with Kotlin and Rust; Android 12 or newer, 64-bit (Pixel-only build). Originally delivered as CrownPulse, now developed here as SoundWaive.
 
 Import a FLAC, choose a look, customize it, and export an MP4 with your music. The original preset includes the distressed three-point crown, a constant symbol color, flying musical staves, reactive particles and filaments. Text is off by default.
 
@@ -30,7 +30,7 @@ sdkmanager 'platforms;android-35' 'build-tools;36.0.0' 'ndk;28.2.13676358'
 ./gradlew check :app:assembleDebug
 ```
 
-The checked-in Rust toolchain file installs the pinned compiler, formatter and three Android targets when Cargo first runs. The Gradle wrapper downloads its checksum-verified distribution. The build generates its small demo from oscillators/noise, then compiles the Rust library for ARM64, ARMv7 and x86_64; no prebuilt native libraries are required.
+The checked-in Rust toolchain file installs the pinned compiler, formatter and three Android targets when Cargo first runs. The Gradle wrapper downloads its checksum-verified distribution. The build generates its small demo from oscillators/noise, then compiles the Rust library for ARM64 (the only ABI since 1.13.0); no prebuilt native libraries are required.
 
 Install `app/build/outputs/apk/debug/app-debug.apk`. Development builds use a separate Android identity so they can coexist with the signed private app. See [release signing](docs/BUILDING.md#release-signing) for update-compatible release builds.
 
@@ -44,7 +44,7 @@ Every push to `main`, pull request, or manual **Android build** run performs Rus
 
 Kotlin owns the Android interface, playback and hardware-codec export. Rust analyzes frequency energy, transients, tempo, beats and bars, and approximate bass pitches. Preview and export share one deterministic renderer.
 
-Keep the app open during analysis/export. Supported input is mono/stereo music up to 30 minutes, subject to the phone's codecs. The bass notes are expressive animation, not verified sheet-music transcription. Physical-phone performance testing remains outstanding; [verification records](docs/VERIFICATION.md) distinguish completed tests from unmeasured behavior.
+Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage. Supported input is mono/stereo music up to 30 minutes, subject to the phone's codecs. The bass notes are expressive animation, not verified sheet-music transcription. Builds 1.0 through 1.11 were tested on device in real time; later builds and the full record are in the [verification notes](docs/VERIFICATION.md).
 
 ![Original visual styles](docs/images/looks.png)
 

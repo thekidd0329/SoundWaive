@@ -25,6 +25,14 @@ class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
     /** Opens/closes background media off the UI thread, independent of analysis/export. */
     private val mediaWorker = Executors.newSingleThreadExecutor()
+    /** Runs the AI background sharpening off the UI thread. */
+    private val aiWorker = Executors.newSingleThreadExecutor()
+    /** Sharpened copy of the background photo (null = none, or nothing to gain). */
+    private var aiPhoto: Bitmap? = null
+    /** The background photo that [aiPhoto] was made (or is being made) from. */
+    private var aiPhotoFor: Bitmap? = null
+    /** Chip that made [aiPhoto]: "TPU", "GPU" or "CPU". */
+    private var aiPhotoChip: String? = null
     private var mediaSignature = ""
     private var showBackgroundOptions = false
     private var showBeatOptions = false
@@ -76,6 +84,7 @@ class MainActivity : Activity() {
     private var scrubbing = false
     private var lastUri: Uri? = null
     private var pendingExport: Uri? = null
+    private var pendingExportPicker = false
     private var closing = false
     private var savedPlayback = false
     private val prefs by lazy { getSharedPreferences("crownpulse", MODE_PRIVATE) }
@@ -94,13 +103,16 @@ class MainActivity : Activity() {
             }
         renderer = VisualRenderer(this)
         restoreImages()
-        for (dir in cacheDir.listFiles() ?: emptyArray()) if (
-            dir.name.startsWith("track-") || dir.name == "exports"
-        )
-            dir.deleteRecursively()
+        val exportJob = ExportSession.job
+        if (exportJob == null) {
+            for (dir in cacheDir.listFiles() ?: emptyArray()) if (
+                dir.name.startsWith("track-") || dir.name == "exports"
+            )
+                dir.deleteRecursively()
+        }
         buildUi()
         refreshBackground()
-        loadDemo()
+        if (exportJob != null) restoreTrack(exportJob.track) else loadDemo()
         if (Build.VERSION.SDK_INT >= 33)
             registerReceiver(
                 noisyReceiver,
@@ -189,9 +201,11 @@ class MainActivity : Activity() {
      */
     private fun refreshBackground() {
         val type = settings.s("backgroundType")
+        if (type == BackgroundMath.PHOTO && settings.b("aiEnhance")) enhancePhoto()
         val signature =
             when (type) {
-                BackgroundMath.PHOTO -> "$type|${System.identityHashCode(renderer.backdrop)}"
+                BackgroundMath.PHOTO ->
+                    "$type|${System.identityHashCode(backgroundPhoto(settings))}"
                 BackgroundMath.GIF,
                 BackgroundMath.VIDEO ->
                     "$type|${settings.s("backgroundUri")}|${settings.s("backgroundEnd")}"
@@ -202,7 +216,7 @@ class MainActivity : Activity() {
         val old = renderer.background
         renderer.background = null
         val snapshot = settings.copy()
-        val photo = renderer.backdrop
+        val photo = backgroundPhoto(snapshot)
         mediaWorker.submit {
             old?.release()
             val opened =
@@ -238,6 +252,68 @@ class MainActivity : Activity() {
                     }
             }
         }
+    }
+
+    /** The photo to show behind everything: the AI-sharpened copy when it is on and ready. */
+    private fun backgroundPhoto(s: Settings): Bitmap? {
+        val photo = renderer.backdrop
+        return if (s.b("aiEnhance") && photo != null && aiPhotoFor === photo) aiPhoto ?: photo
+        else photo
+    }
+
+    /**
+     * Sharpens and cleans up the background photo once (at import, or when the switch is
+     * turned on) and keeps the result in filesDir, so it is never redone. Any failure leaves
+     * the original photo, with a log line.
+     */
+    private fun enhancePhoto() {
+        val source = renderer.backdrop ?: return
+        if (aiPhotoFor === source) return
+        aiPhotoFor = source
+        aiPhoto = null
+        aiPhotoChip = null
+        val app = applicationContext
+        aiWorker.submit {
+            var result: Bitmap? = null
+            var chip: String? = null
+            try {
+                val ai = AiUpscaler.get(app)
+                if (ai != null) {
+                    result = ai.enhance(source, AI_PHOTO_SHORT_SIDE)
+                    chip = ai.chip
+                    val image = result
+                    if (image != null)
+                        File(filesDir, AI_PHOTO_FILE).outputStream().use {
+                            image.compress(Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                    // "none" means the photo was already sharp enough: don't try again.
+                    File(filesDir, AI_PHOTO_INFO).writeText(if (image != null) ai.chip else "none")
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("SoundWaive", "AI photo sharpening skipped", e)
+                result = null
+            }
+            val done = result
+            val usedChip = chip
+            runOnUiThread {
+                if (!closing && renderer.backdrop === source && aiPhotoFor === source) {
+                    aiPhoto = done
+                    aiPhotoChip = usedChip
+                    if (done != null) {
+                        refreshBackground()
+                        preview.invalidate()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun forgetAiPhoto() {
+        aiPhoto = null
+        aiPhotoFor = null
+        aiPhotoChip = null
+        File(filesDir, AI_PHOTO_FILE).delete()
+        File(filesDir, AI_PHOTO_INFO).delete()
     }
 
     private fun pickBackground(type: String) {
@@ -354,7 +430,10 @@ class MainActivity : Activity() {
             }
         busyRow.addView(progressBar, LinearLayout.LayoutParams(-1, dp(8)))
         busyRow.addView(
-            button("Cancel", false) { cancel.set(true) },
+            button("Cancel", false) {
+                if (ExportSession.isRunning()) ExportSession.cancel.set(true)
+                else cancel.set(true)
+            },
             LinearLayout.LayoutParams(-1, dp(36)),
         )
         root.addView(busyRow, LinearLayout.LayoutParams(-1, -2))
@@ -957,6 +1036,8 @@ class MainActivity : Activity() {
             addButtonRow(button("Choose a different ${type.lowercase()}") { pickBackground(type) })
             slider("Dim", "backgroundDim", 0f, 1f)
             toggle("Pulse with the beat", "backgroundPulse")
+            if (type == BackgroundMath.PHOTO || type == BackgroundMath.VIDEO)
+                toggle("Sharpen & clean up background (AI)", "aiEnhance")
             addButtonRow(
                 button(if (showBackgroundOptions) "Fewer options" else "More options") {
                     showBackgroundOptions = !showBackgroundOptions
@@ -1045,7 +1126,7 @@ class MainActivity : Activity() {
             duration * ((settings.s("bitrate").substringBefore(' ').toIntOrNull() ?: 12) + .32f) / 8
         section(
             "Ready to render",
-            "MP4 video with the full selected audio range. Estimated size: ${mb.toInt()} MB. Keep the app open while exporting.",
+            "MP4 video with the full selected audio range. Estimated size: ${mb.toInt()} MB. You can leave the app; a notification shows the percentage.",
         )
         addButtonRow(button("Export video", true) { requestExport() })
         if (lastUri != null)
@@ -1081,7 +1162,10 @@ class MainActivity : Activity() {
     private fun requestExport() {
         currentFocus?.clearFocus()
         if (busy || track == null) return
-        pause()
+        if (ExportSession.isRunning()) {
+            toast("An export is already running.")
+            return
+        }
         val t = track!!
         if (settings.f("trimStart") < 0 || settings.f("trimStart") >= t.analysis.duration) {
             toast("Start time must be inside the song.")
@@ -1091,6 +1175,20 @@ class MainActivity : Activity() {
             toast("End time must be after the start time.")
             return
         }
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingExportPicker = true
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 109)
+            return
+        }
+        openExportPicker()
+    }
+
+    private fun openExportPicker() {
+        pause()
         startActivityForResult(
             Intent(Intent.ACTION_CREATE_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
@@ -1102,81 +1200,129 @@ class MainActivity : Activity() {
 
     private fun renderExport(uri: Uri) {
         val original = track ?: return
+        if (ExportSession.isRunning()) return
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        } catch (_: Exception) {}
         val snapshot = settings.copy()
         pause()
+        val job =
+            ExportJob(
+                output = uri,
+                track = original,
+                settings = snapshot,
+                artwork = renderer.artwork,
+                backdrop = renderer.backdrop,
+                photo = backgroundPhoto(snapshot),
+                aiPhoto = aiPhoto,
+                aiPhotoChip = aiPhotoChip,
+            )
+        if (!ExportSession.begin(job)) {
+            toast("An export is already running.")
+            return
+        }
         startBusy("Preparing export")
-        worker.submit {
-            var exportBackground: BackgroundSource? = null
-            try {
-                var ready = original
-                if (ready.pcm == null) {
-                    val decoded =
-                        AudioEngine(this).decode(original.uri, original.name, cancel) { label, value
-                            ->
-                            progress(label, value * .08f)
-                        }
-                    ready = decoded.copy(analysis = original.analysis)
-                    runOnUiThread { track = ready }
-                }
-                val engine = VisualRenderer(this)
-                engine.artwork = renderer.artwork
-                engine.backdrop = renderer.backdrop
-                val (outW, outH) = VideoExporter().dimensions(snapshot)
-                exportBackground =
-                    try {
-                        // A private instance decodes in order, exactly by export time.
-                        BackgroundMedia.open(
-                            this,
-                            snapshot,
-                            renderer.backdrop,
-                            BackgroundMedia.PREVIEW_SHORT_SIDE,
-                            BackgroundMath.Size(outW, outH),
-                        )
-                    } catch (e: Exception) {
-                        runOnUiThread {
-                            toast("The background can't be opened; exporting with the color.")
-                        }
-                        null
+        try {
+            startForegroundService(
+                Intent(this, ExportService::class.java).setAction(ExportService.ACTION_START)
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("SoundWaive", "Could not start the export service", e)
+            ExportSession.fail(e.message ?: "Couldn’t start the export.")
+            showExportStatus(ExportSession.status)
+        }
+    }
+
+    private val exportListener: (ExportStatus) -> Unit = { state ->
+        main.post { showExportStatus(state) }
+    }
+
+    private fun showExportStatus(state: ExportStatus) {
+        if (closing) return
+        ExportSession.job?.track?.let { ready ->
+            if (track?.pcm == null && ready.pcm != null) track = ready
+        }
+        when (state) {
+            is ExportStatus.Idle -> {}
+            is ExportStatus.Running -> {
+                if (!busy) startBusy(state.label)
+                this.status.text = state.label
+                progressBar.progress = (state.progress * 1000).toInt()
+            }
+            is ExportStatus.Finished,
+            is ExportStatus.Failed,
+            is ExportStatus.Canceled -> {
+                val result = ExportSession.consume() ?: return
+                when (result) {
+                    is ExportStatus.Finished -> {
+                        lastUri = result.uri
+                        endBusy()
+                        showPage("Export")
+                        AlertDialog.Builder(this)
+                            .setTitle("Your video is ready")
+                            .setMessage(
+                                "${result.width} × ${result.height} · ${formatTime(result.duration)} · full audio" +
+                                    (result.aiLine?.let { "\n\n$it" } ?: "") +
+                                    (result.notice?.let { "\n\n$it" } ?: "")
+                            )
+                            .setPositiveButton("Play") { _, _ -> openExport() }
+                            .setNeutralButton("Share") { _, _ -> shareExport() }
+                            .setNegativeButton("Done", null)
+                            .show()
                     }
-                engine.background = exportBackground
-                val result =
-                    VideoExporter().export(
-                        ready,
-                        snapshot,
-                        engine,
-                        File(cacheDir, "exports"),
-                        cancel,
-                    ) { label, value ->
-                        progress(label, value)
+                    is ExportStatus.Failed -> {
+                        endBusy()
+                        AlertDialog.Builder(this)
+                            .setTitle("Couldn’t finish")
+                            .setMessage(result.message)
+                            .setPositiveButton("OK", null)
+                            .show()
                     }
-                if (cancel.get()) throw InterruptedException("Canceled")
-                contentResolver.openOutputStream(uri, "w")!!.use { out ->
-                    result.file.inputStream().use { it.copyTo(out) }
+                    is ExportStatus.Canceled -> endBusy()
+                    else -> {}
                 }
-                result.file.delete()
-                runOnUiThread {
-                    lastUri = uri
-                    endBusy()
-                    showPage("Export")
-                    AlertDialog.Builder(this)
-                        .setTitle("Your video is ready")
-                        .setMessage(
-                            "${result.width} × ${result.height} · ${formatTime(result.duration)} · full audio"
-                        )
-                        .setPositiveButton("Play") { _, _ -> openExport() }
-                        .setNeutralButton("Share") { _, _ -> shareExport() }
-                        .setNegativeButton("Done", null)
-                        .show()
-                }
-            } catch (e: Exception) {
-                try {
-                    android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
-                } catch (_: Exception) {}
-                fail(e)
-            } finally {
-                exportBackground?.release()
             }
         }
+    }
+
+    /** Rebuild the player for a track already in memory, without resetting export trim times. */
+    private fun restoreTrack(t: Track) {
+        track = t
+        position = 0f
+        prepared = false
+        player?.release()
+        player =
+            MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                setDataSource(this@MainActivity, t.uri)
+                setOnPreparedListener {
+                    prepared = true
+                    updateClock()
+                    if (::preview.isInitialized) preview.invalidate()
+                }
+                setOnCompletionListener {
+                    play.text = "▶"
+                    position = t.analysis.duration
+                    updateClock()
+                }
+                setOnErrorListener { _, _, _ ->
+                    toast("Audio playback failed. Try importing the file again.")
+                    prepared = false
+                    true
+                }
+                prepareAsync()
+            }
+        if (::seek.isInitialized) seek.progress = 0
+        if (::preview.isInitialized) preview.invalidate()
+        if (::clock.isInitialized) updateClock()
     }
 
     private fun openExport() {
@@ -1254,6 +1400,20 @@ class MainActivity : Activity() {
                 if (name == "artwork") renderer.artwork = bitmap else renderer.backdrop = bitmap
             }
         }
+        // The sharpened background photo from an earlier run, if any.
+        val photo = renderer.backdrop
+        val info = File(filesDir, AI_PHOTO_INFO)
+        if (photo != null && info.isFile) {
+            val chip = info.readText().trim()
+            val sharp =
+                if (chip == "none") null
+                else BitmapFactory.decodeFile(File(filesDir, AI_PHOTO_FILE).absolutePath)
+            if (chip == "none" || sharp != null) {
+                aiPhotoFor = photo
+                aiPhoto = sharp
+                aiPhotoChip = if (sharp != null) chip else null
+            }
+        }
     }
 
     private fun readImage(uri: Uri, background: Boolean) {
@@ -1273,6 +1433,7 @@ class MainActivity : Activity() {
             val file = File(filesDir, if (background) "background.png" else "artwork.png")
             file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             if (background) {
+                forgetAiPhoto()
                 renderer.backdrop = image
                 settings.set("backgroundType", BackgroundMath.PHOTO)
             } else {
@@ -1283,6 +1444,19 @@ class MainActivity : Activity() {
             showPage(page)
         } catch (e: Exception) {
             toast(e.message ?: "Image could not be imported")
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 109 && pendingExportPicker) {
+            pendingExportPicker = false
+            if (busy || track == null) return
+            openExportPicker()
         }
     }
 
@@ -1374,12 +1548,28 @@ class MainActivity : Activity() {
             return
         }
         if (busy) {
-            AlertDialog.Builder(this)
-                .setTitle("Work is still running")
-                .setMessage("Keep SoundWaive open until it finishes, or cancel this operation.")
-                .setPositiveButton("Keep working", null)
-                .setNegativeButton("Cancel operation") { _, _ -> cancel.set(true) }
-                .show()
+            if (ExportSession.isRunning()) {
+                AlertDialog.Builder(this)
+                    .setTitle("Export is still running")
+                    .setMessage(
+                        "You can leave SoundWaive. The export keeps going, and a notification shows the percentage."
+                    )
+                    .setPositiveButton("Leave") { _, _ -> moveTaskToBack(true) }
+                    .setNegativeButton("Cancel export") { _, _ ->
+                        ExportSession.cancel.set(true)
+                    }
+                    .setNeutralButton("Stay", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle("Work is still running")
+                    .setMessage(
+                        "Keep SoundWaive open until it finishes, or cancel this operation."
+                    )
+                    .setPositiveButton("Keep working", null)
+                    .setNegativeButton("Cancel operation") { _, _ -> cancel.set(true) }
+                    .show()
+            }
             return
         }
         super.onBackPressed()
@@ -1389,7 +1579,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Make every track its own world")
             .setMessage(
-                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis and export.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size."
+                "1. Import music, or try the original demo.\n2. Press Play and choose a look.\n3. Change symbols, colors, layers and motion.\n4. Save your look, then export an MP4.\n\nNew variation changes the arrangement while respecting your symbol and color locks. Custom symbols work best as transparent PNGs.\n\nEverything runs on your phone. Bass notation is estimated from the mix. Exports use the same renderer as the preview. Keep the app open during analysis. Exports keep running in the background, with a notification that shows the percentage.\n\nSupported: Android 8+, mono/stereo music, up to 30 minutes. Storage for imported audio and exports is separate from the app size."
             )
             .setPositiveButton("Let’s make something", null)
             .show()
@@ -1403,8 +1593,14 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        ExportSession.listen(exportListener)
+    }
+
     override fun onPause() {
         super.onPause()
+        ExportSession.stopListening(exportListener)
         pause()
         audioManager.abandonAudioFocusRequest(focusRequest)
         currentFocus?.clearFocus()
@@ -1413,7 +1609,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         closing = true
-        cancel.set(true)
+        ExportSession.stopListening(exportListener)
+        if (!ExportSession.isRunning()) cancel.set(true)
         try {
             unregisterReceiver(noisyReceiver)
         } catch (_: Exception) {}
@@ -1426,6 +1623,7 @@ class MainActivity : Activity() {
             mediaWorker.submit { old?.release() }
         }
         mediaWorker.shutdown()
+        aiWorker.shutdown()
         super.onDestroy()
     }
 
@@ -1457,5 +1655,12 @@ class MainActivity : Activity() {
             renderer.draw(canvas, w, h, displayTime, t.analysis, settings)
             canvas.restore()
         }
+    }
+
+    private companion object {
+        /** The AI sharpens background photos for frames up to 1080 pixels on the short side. */
+        const val AI_PHOTO_SHORT_SIDE = 1080
+        const val AI_PHOTO_FILE = "background-ai.png"
+        const val AI_PHOTO_INFO = "background-ai.txt"
     }
 }
