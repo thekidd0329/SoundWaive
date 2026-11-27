@@ -1,5 +1,17 @@
 # SoundWaive release notes
 
+## 1.17.5 — Cache cleanup
+
+**What's new**
+- **The app no longer keeps growing as you export.** Temporary files from AI-sharpened video backgrounds, leftover export scratch and unused imported-audio copies are removed when an export finishes and when you open the app.
+- **Clear cache** is on the Export screen, under Storage. It shows how much space the cache is using. It does not remove saved looks, artwork, backgrounds or the demo.
+
+**Good to know**
+- A later export of the same AI-sharpened video background will sharpen the frames again, instead of leaving a large leftover cache on the phone.
+- The song you currently have open is kept, so you don't have to import it again. After you leave the app and come back, that temporary audio is cleared too (the demo loads as usual).
+- **Clear cache** is turned off while an export is running.
+
+
 ## 1.16.0 — Android device compatibility
 
 SoundWaive now installs on Android 8.0 and newer across 32-bit and 64-bit ARM and Intel devices. Background sharpening uses the available GPU or CPU, with optional Tensor G5 acceleration. Exports continue when you leave the app. When the phone needs a lower video setting, the completed export shows what it used.

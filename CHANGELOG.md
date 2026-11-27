@@ -1,5 +1,20 @@
 # Changes
 
+## [1.17.5] - 2026-11-26
+
+### Fixed
+- **Cache growth after exports.** Exporting with an AI-sharpened video background saved a JPEG of every upscaled frame under `cache/ai-video/`. Only the newest clip was kept, but that folder was never deleted, so cache could grow to hundreds of megabytes (640 MB on Christian's Pixel). Launch cleanup only removed `track-*` and `exports`, so leftover `aac-timing-*` probe folders could also stay behind if a process was killed.
+
+### Changed
+- After each export finishes, fails or is canceled, the AI frame cache, leftover export scratch and stray `aac-timing-*` folders are deleted. The cache only helped an immediate re-export of the same clip, or a later Release Pack item of the same size in the same job. Clearing it after the job is simpler than a size cap and stops the leftover growth. A later export of the same clip sharpens the frames again.
+- On launch, when no export is running, everything in `cacheDir` is removed. The demo, looks, artwork and photos live in app storage (`filesDir`) and are not touched.
+
+### Added
+- Export › **Storage** shows how much cache the app is using and has **Clear cache**. It is disabled while an export is running. It never deletes saved looks, artwork, backgrounds, the AI photo or the demo. The song you have open is kept so it does not have to be imported again.
+
+Not built or run locally. Awaiting CI and Christian's on-device test.
+
+
 ## [1.15.0] - 2026-11-26
 
 ### Added
