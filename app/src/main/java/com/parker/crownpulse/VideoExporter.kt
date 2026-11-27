@@ -440,16 +440,25 @@ class VideoExporter(private val context: Context) {
     ): Int {
         val reference = listOf("c2.android.aac.encoder", "OMX.google.aac.encoder")
         val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
-            .filter { it.isEncoder && MediaFormat.MIMETYPE_AUDIO_AAC in it.supportedTypes }
+            .filter { it.isEncoder && it.supportedTypes.any { type -> type.equals(MediaFormat.MIMETYPE_AUDIO_AAC, ignoreCase = true) } }
             .sortedBy { reference.indexOf(it.name).let { rank -> if (rank < 0) reference.size else rank } }
+        var lastFailure: Exception? = null
         for (encoder in encoders) {
-            val caps = encoder.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC)
-            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, track.rate, track.channels)
-            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-            val preferredRate = if (track.channels == 2) 320000 else 160000
-            format.setInteger(MediaFormat.KEY_BIT_RATE, caps.audioCapabilities.bitrateRange.clamp(preferredRate))
-            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
-            if (!caps.isFormatSupported(format)) continue
+            if (cancel.get()) throw InterruptedException("Export canceled")
+            val format = try {
+                val caps = encoder.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC)
+                val candidate = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, track.rate, track.channels)
+                candidate.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                val preferredRate = if (track.channels == 2) 320000 else 160000
+                candidate.setInteger(MediaFormat.KEY_BIT_RATE, caps.audioCapabilities.bitrateRange.clamp(preferredRate))
+                candidate.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+                if (!caps.isFormatSupported(candidate)) continue
+                candidate
+            } catch (e: Exception) {
+                lastFailure = e
+                Log.w(TAG, "Cannot query ${encoder.name}", e)
+                continue
+            }
             val vendor = encoder.name !in reference
             fun startCodec(): MediaCodec {
                 val codec = MediaCodec.createByCodecName(encoder.name)
@@ -471,18 +480,30 @@ class VideoExporter(private val context: Context) {
                 } catch (e: InterruptedException) {
                     throw e
                 } catch (e: Exception) {
+                    lastFailure = e
                     Log.w(TAG, "Could not calibrate ${encoder.name}", e)
                     continue
                 }
             } else 2048
             val codec = try { startCodec() } catch (e: Exception) {
+                lastFailure = e
                 Log.w(TAG, "Cannot start ${encoder.name}", e)
                 continue
             }
-            writeAac(codec, track, start, end, out, delay, vendor, cancel, fadeIn, fadeOut, progress)
-            return delay
+            try {
+                writeAac(codec, track, start, end, out, delay, vendor, cancel, fadeIn, fadeOut, progress)
+                return delay
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Exception) {
+                if (cancel.get()) throw InterruptedException("Export canceled")
+                lastFailure = e
+                Log.w(TAG, "AAC export failed on ${encoder.name}; trying another encoder", e)
+                // writeAac has released the codec and muxer before we remove the partial output.
+                out.delete()
+            }
         }
-        throw IOException("This device has no usable AAC-LC encoder for ${track.rate} Hz, ${track.channels} channel(s).")
+        throw IOException("This device has no usable AAC-LC encoder for ${track.rate} Hz, ${track.channels} channel(s).", lastFailure)
     }
 
     private fun writeAac(
@@ -509,8 +530,11 @@ class VideoExporter(private val context: Context) {
             val fadeOutFrames = (fadeOut * track.rate).toLong().coerceAtLeast(0)
             RandomAccessFile(track.pcm!!, "r").use { file ->
                 file.seek((start * track.rate).toLong() * bytesPerFrame)
+                var lastProgress = android.os.SystemClock.elapsedRealtime()
                 while (!outputDone) {
                     if (cancel.get()) throw InterruptedException("Export canceled")
+                    if (android.os.SystemClock.elapsedRealtime() - lastProgress > 30_000L)
+                        throw IOException("AAC encoder stopped responding.")
                     if (!inputDone) {
                         val ix = codec.dequeueInputBuffer(10000)
                         if (ix >= 0) {
@@ -540,10 +564,12 @@ class VideoExporter(private val context: Context) {
                                     MediaCodec.BUFFER_FLAG_END_OF_STREAM,
                                 )
                                 inputDone = true
+                                lastProgress = android.os.SystemClock.elapsedRealtime()
                             } else {
                                 b.put(temp, 0, count)
                                 codec.queueInputBuffer(ix, 0, count, pts, 0)
                                 read += count
+                                lastProgress = android.os.SystemClock.elapsedRealtime()
                                 progress((read.toFloat() / total).coerceIn(0f, 1f))
                             }
                         }
@@ -561,6 +587,7 @@ class VideoExporter(private val context: Context) {
                             trackIndex = mux.addTrack(audioFormat)
                             mux.start()
                             started = true
+                            lastProgress = android.os.SystemClock.elapsedRealtime()
                         }
                         else ->
                             if (ix >= 0) {
@@ -576,6 +603,7 @@ class VideoExporter(private val context: Context) {
                                         info.presentationTimeUs -= origin
                                     }
                                     mux.writeSampleData(trackIndex, b, info)
+                                    lastProgress = android.os.SystemClock.elapsedRealtime()
                                 }
                                 outputDone =
                                     info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
