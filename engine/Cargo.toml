@@ -6,6 +6,17 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["lyrics"]
+# Word-timed lyrics (tract ONNX). Build with --no-default-features for an ABI where tract
+# can't build; the app then hides the Lyrics screen (NativeEngine.lyricsAvailable()).
+lyrics = ["dep:lyrics-aligner", "dep:serde_json", "dep:anyhow"]
+
+[dependencies]
+lyrics-aligner = { path = "lyrics-aligner", optional = true }
+serde_json = { version = "1", optional = true }
+anyhow = { version = "1", optional = true }
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
 

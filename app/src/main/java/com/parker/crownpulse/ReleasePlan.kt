@@ -77,6 +77,14 @@ object ReleasePlan {
         val loop: Boolean
             get() = kind == Kind.CANVAS
 
+        /**
+         * Whether the lyrics layer is on by default for this clip. Every shape gets karaoke
+         * lyrics framed for it except the silent Spotify Canvas loop (Spotify shows its own
+         * lyrics there); the "Lyrics on Spotify Canvas" switch overrides that.
+         */
+        val lyricsByDefault: Boolean
+            get() = kind != Kind.CANVAS
+
         /** Different variation seed per vertical clip so the three promos look distinct. */
         val seedOffset: Int
             get() =

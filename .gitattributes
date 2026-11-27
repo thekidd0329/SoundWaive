@@ -15,3 +15,6 @@ gradlew.bat text eol=crlf
 *.tflite binary
 # Preserve upstream license formatting verbatim.
 licenses/** whitespace=-blank-at-eof
+*.onnx binary
+*.gz binary
+app/src/main/assets/lyrics/NOTICE.txt -text

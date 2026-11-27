@@ -31,7 +31,7 @@ CI results are recorded separately. They are not a substitute for a device test.
 
 Everything else Christian tested on 1.0 through 1.11 worked smoothly.
 
-## 1.12.x through 1.16.0
+## 1.12.x through 1.17.0
 
 These builds are awaiting Christian's device test.
 
@@ -44,6 +44,7 @@ These builds are awaiting Christian's device test.
 | 1.14.0 | 2026-11-21 | Awaiting Christian's device test | Background export: a `mediaProcessing` foreground service so a render keeps going when the app leaves the screen. |
 | 1.15.0 | 2026-11-26 | Awaiting Christian's device test | Release Pack: one tap renders YouTube 16:9 (4K or 1080p), three distinct 15 s verticals, a 30 s reel, a square promo and a silent 8 s looping Spotify Canvas to Movies/SoundWaive/<song>/. Not built or run locally; awaiting CI and Christian's on-device test. |
 | 1.16.0 | 2026-11-22 | Awaiting Christian's device test | Android 8+ support across four ARM and Intel ABIs. |
+| 1.17.0 | 2026-11-26 | Awaiting Christian's device test | Word-timed karaoke lyrics: offline Rust aligner (tract ONNX), tap-to-fix, lyrics layer above the crown in preview, CPU and GPU export and every Release Pack shape (off on the Canvas by default). Not built with Gradle or run locally; awaiting CI and Christian's on-device test. |
 
 GitHub Actions history for a given commit is at the [Android workflow runs](https://github.com/thekidd0329/SoundWaive/actions/workflows/android.yml).
 
@@ -52,6 +53,16 @@ GitHub Actions history for a given commit is at the [Android workflow runs](http
 Before the Release Pack integration, the compatibility branch's local build passed 24 Rust tests, 53 JVM tests and Android lint with zero errors. The debug APK, release APK and release AAB contain the Rust analysis engine and the appropriate offline sharpening libraries for all four ABIs. An API 26 x86 emulator imported the demo, exported an H.264/AAC MP4 after leaving the activity and checked the AAC timing against a reference pulse.
 
 The Android workflow runs the background export, AAC priming and photo sharpening tests on AOSP images for APIs 26, 34 and 35. Each device job publishes its instrumentation results. The rebased build also checks saving a completed MP4 through the Release Pack storage path and rendering a silent loop through the adaptive AVC encoder. These new combined checks, the AVC/AAC fallback changes and the rebased build are awaiting CI; earlier results are historical.
+
+## 1.17.0 lyrics checks
+
+Done on the development box before the pull request, without Gradle or a device:
+
+- `cargo test` on the host engine (27 tests, including the lyric-word mapping and PCM mixdown tests) and `cargo fmt --check` pass.
+- Release `cargo build --lib` of the engine with the `lyrics` feature for all four Android targets (aarch64, armv7, i686, x86_64) with NDK r27c at API 26; the JNI symbols `alignLyrics`, `lyricsAvailable` and `analyze` are exported. CI builds with the pinned NDK 28.2.13676358.
+- On a private reference song (not committed), the vendored aligner called through the engine's lyrics entry gives word onsets identical (0.0 ms) to the standalone port's CLI: 460 words, 4.2 s on the box's CPU with the stability check.
+
+Still to check on the phone, by Christian: the Lyrics tab, alignment time and memory on the Pixel, dictation, tap-to-fix and calibration, and the lyrics layer above the crown in the preview, a normal export (GPU path) and a Release Pack.
 
 ## Original 1.0 emulator checks
 

@@ -275,6 +275,7 @@ class ExportService : Service() {
         val engine = VisualRenderer(this)
         engine.artwork = job.artwork
         engine.backdrop = job.backdrop
+        engine.lyrics = job.lyrics?.let { LyricsOverlay(it) }
         val (outW, outH) = VideoExporter(this).dimensions(snapshot, options)
         val photo = job.photo
         var aiChip: String? =

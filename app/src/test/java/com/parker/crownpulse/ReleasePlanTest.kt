@@ -112,4 +112,10 @@ class ReleasePlanTest {
         }
         assertTrue(p.of(Kind.CANVAS).window.length <= 8f + eps)
     }
+
+    @Test
+    fun lyricsAreOnForEveryClipButTheCanvas() {
+        val items = ReleasePlan.plan(song(), 3840 to 2160, 30f)
+        for (item in items) assertEquals(item.kind != Kind.CANVAS, item.lyricsByDefault)
+    }
 }
